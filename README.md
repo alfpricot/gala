@@ -11,7 +11,7 @@ gala keeps the release pipeline and leaves out everything around it: no recovery
 In consumer CI, pin to a release tag (reproducible builds):
 
 ```sh
-go install github.com/alfpricot/gala/cmd/gala@v1.4.2
+go install github.com/alfpricot/gala/cmd/gala@v0.1.0
 ```
 
 For local use, `@latest` is fine:
@@ -38,30 +38,24 @@ Flags: `--config <path>` (overrides `gala.toml` discovery), `--cwd <dir>` (run a
 
 Exit codes: `0` success or no release due, `1` failure, `2` usage error.
 
-`gala plan` is read-only and works on any branch:
+`gala plan` is read-only and works on any branch. This is the live output from this repository's own checkout, where three merged fixes await the next promotion:
 
 ```text
-gala plan — release due (branch main)
+gala plan — release due (branch dev)
 
-app → v0.2.0 (minor, from v0.1.0)
-
-  Features
-
-    * compute the plan before writing anything (#14)
-
+gala → v0.1.1 (patch, from v0.1.0)
   Bug Fixes
-
-    * keep --end-of-options ahead of revisions (#15)
-
-  skipped: 1 non-conforming commit
+    require the reference right after a closure keyword (#5)
+    read refs from the subject and closure footers only (#4)
+    stop repeating refs and tidy the no-release reason (#3)
 ```
 
-Nothing to release is a success, with a reason:
+Nothing to release is a success, with a reason — captured from the same checkout immediately after its own `v0.1.0` release:
 
 ```text
-gala plan — nothing to release (branch main)
+gala plan — nothing to release (branch dev)
 
-app → no release: no releasable commits to . since v0.2.0 (3 commits, 1 skipped)
+gala → no release: no commits since v0.1.0
 ```
 
 ## Configuration

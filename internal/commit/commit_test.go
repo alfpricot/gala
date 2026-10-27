@@ -100,7 +100,7 @@ func TestBreaking(t *testing.T) {
 }
 
 func TestRefs(t *testing.T) {
-	c := Parse("abc", "fix: wrong pin (#42)", "also closes #7 and #42")
+	c := Parse("abc", "fix: wrong pin (#42)", "closes #7 and #42")
 	want := []string{"#42", "#7"}
 	if !reflect.DeepEqual(c.Refs, want) {
 		t.Errorf("Refs = %v, want %v", c.Refs, want)
@@ -108,11 +108,29 @@ func TestRefs(t *testing.T) {
 	if none := Parse("abc", "fix: nothing referenced", ""); len(none.Refs) != 0 {
 		t.Errorf("Refs = %v, want none", none.Refs)
 	}
-	// Non-conforming commits still surface their refs so a skipped message can
-	// be traced back.
+	// Non-conforming commits still surface their subject refs so a skipped
+	// message can be traced back.
 	m := Parse("abc", "addressed #99 in passing", "")
 	if !reflect.DeepEqual(m.Refs, []string{"#99"}) {
 		t.Errorf("Refs = %v, want [#99]", m.Refs)
+	}
+	// A closure footer contributes; prose that merely mentions a number or an
+	// example like "(#42)" does not.
+	f := Parse("abc", "fix: honor the config file",
+		"the renderer used to append (#42) verbatim, see the example.\n\nCloses #7")
+	if !reflect.DeepEqual(f.Refs, []string{"#7"}) {
+		t.Errorf("Refs = %v, want [#7] — prose numbers must not count", f.Refs)
+	}
+	// A footer keyword only counts at the start of a line, followed directly
+	// by the reference: mid-line keywords and keyword-led prose are not refs.
+	mid := Parse("abc", "fix: subject", "the phrase closes #8 appears mid-line")
+	if len(mid.Refs) != 0 {
+		t.Errorf("Refs = %v, want none — a mid-line keyword is prose", mid.Refs)
+	}
+	prose := Parse("abc", "fix: subject",
+		"Ref extraction scanned the whole message, so an illustrative (#42) in body prose\nbecame a changelog reference.")
+	if len(prose.Refs) != 0 {
+		t.Errorf("Refs = %v, want none — a keyword-led sentence is prose", prose.Refs)
 	}
 }
 

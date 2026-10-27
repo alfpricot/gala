@@ -353,11 +353,17 @@ func (e *Engine) buildPackagePlan(s spec, anchor string, base semver.Version, co
 		if anchor != "" {
 			anchorName = anchor
 		}
+		// An app plans against the repo root; "commits to ." reads badly, so
+		// only a monorepo package names its directory.
+		where := ""
+		if s.relDir != "." {
+			where = " to " + s.relDir
+		}
 		if len(commits) == 0 {
-			pkg.Reason = fmt.Sprintf("no commits to %s since %s", s.relDir, anchorName)
+			pkg.Reason = fmt.Sprintf("no commits%s since %s", where, anchorName)
 		} else {
-			pkg.Reason = fmt.Sprintf("no releasable commits to %s since %s (%d commits, %d skipped)",
-				s.relDir, anchorName, len(commits), pkg.Skipped)
+			pkg.Reason = fmt.Sprintf("no releasable commits%s since %s (%d commit%s, %d skipped)",
+				where, anchorName, len(commits), plural(len(commits)), pkg.Skipped)
 		}
 		return pkg, nil
 	}
