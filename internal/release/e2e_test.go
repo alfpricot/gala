@@ -261,7 +261,7 @@ path = "packages/cli"
 	mustContain(t, planOut, "1 of 2 packages due", "the header counts due packages")
 
 	// Now cli changes too: both release, publishes in declaration order.
-	commit("packages/cli/src/lib.rs", "pub fn main() {}\n", "fix: honour the config file")
+	commit("packages/cli/src/lib.rs", "pub fn main() {}\n", "fix: honor the config file")
 
 	exec2 := &captureRunner{}
 	opts2, out2, warn2 := testOptions(r, exec2)
