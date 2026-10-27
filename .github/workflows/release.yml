@@ -42,6 +42,13 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Configure git identity
+        # The release commit is made by gala with the runner's git; without an
+        # identity git refuses to commit at all.
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
       - name: Release
         env:
           GITHUB_TOKEN: ${{ github.token }}

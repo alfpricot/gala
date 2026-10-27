@@ -80,7 +80,9 @@ func (e *Engine) execute(plan *Plan, publish bool) error {
 	// not wake the release workflow again.
 	subject, body := releaseCommit(e.cfg.Kind == config.KindMonorepo, due)
 	if err := e.repo.Commit(subject, body); err != nil {
-		return fmt.Errorf("cannot create the release commit: %w", err)
+		return fmt.Errorf("cannot create the release commit: %w\n"+
+			"  git needs an author identity for the release commit — set user.name and user.email "+
+			"(in CI: git config user.name ... && git config user.email ... before the release step)", err)
 	}
 	e.note("commit  %s", subject)
 
