@@ -68,8 +68,17 @@ func bullet(c commit.Commit) string {
 	if c.Scope != "" {
 		line = fmt.Sprintf("**%s:** %s", c.Scope, line)
 	}
-	if len(c.Refs) > 0 {
-		line += " (" + strings.Join(c.Refs, ", ") + ")"
+	// Append only the refs the line does not already carry: a squash-merge
+	// subject arrives as "fix: ... (#42)", and repeating the number reads like
+	// a mistake.
+	var extra []string
+	for _, r := range c.Refs {
+		if !strings.Contains(line, r) {
+			extra = append(extra, r)
+		}
+	}
+	if len(extra) > 0 {
+		line += " (" + strings.Join(extra, ", ") + ")"
 	}
 	return line
 }

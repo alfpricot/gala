@@ -62,6 +62,28 @@ func TestBuildEmpty(t *testing.T) {
 	}
 }
 
+// TestBuildDoesNotRepeatRefs: squash-merge subjects already end in (#42), and
+// the ref extraction finds that same number.
+func TestBuildDoesNotRepeatRefs(t *testing.T) {
+	commits := []commit.Commit{
+		commit.Parse("a", "fix: give the release workflow a git identity (#1)", ""),
+		commit.Parse("b", "fix(core): repair the edge case (#2)", ""),
+	}
+	got := Build("## 0.1.1 (2026-10-27)", commits)
+
+	if strings.Count(got, "(#1)") != 1 {
+		t.Errorf("ref #1 must appear exactly once:\n%s", got)
+	}
+	// A body ref the subject does not carry is still appended, next to the
+	// one the squash title already had.
+	mixed := Build("## 0.1.1 (2026-10-27)", []commit.Commit{
+		commit.Parse("c", "fix: two things (#1)", "closes #7"),
+	})
+	if strings.Count(mixed, "(#1)") != 1 || !strings.Contains(mixed, "two things (#1) (#7)") {
+		t.Errorf("mixed refs should render both without repeating #1:\n%s", mixed)
+	}
+}
+
 func TestBuildBreakingFirstRegardlessOfOrder(t *testing.T) {
 	commits := []commit.Commit{
 		commit.Parse("a", "feat: later", ""),
