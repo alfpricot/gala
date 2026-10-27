@@ -1,8 +1,13 @@
 # gala — build recipes.
 #
 # The gate (just check) is what CI runs; run it before every push.
+#
+# Every recipe is POSIX sh. just picks its shell from PATH — on this machine
+# that is Git's sh even on Windows — so a single dialect keeps `just check`
+# identical everywhere it runs. CI does not use just; verify.yml spells the
+# same steps out as workflow run steps.
 
-set shell := if os_family() == "windows" { ["powershell", "-NoProfile", "-Command"] } else { ["sh", "-c"] }
+set shell := ["sh", "-c"]
 
 default: check
 
@@ -15,13 +20,8 @@ fmt:
     gofmt -w cmd internal
 
 # Fail when anything is unformatted.
-[windows]
 fmt-check:
-    $bad = gofmt -l cmd internal; if ($bad) { Write-Error "unformatted files:`n$bad"; exit 1 }
-
-[unix]
-fmt-check:
-    test -z "$(gofmt -l cmd internal)" || { gofmt -l cmd internal; exit 1; }
+    bad="$(gofmt -l cmd internal)"; if [ -n "$bad" ]; then echo "unformatted files:"; echo "$bad"; exit 1; fi
 
 # Static analysis.
 vet:
@@ -51,6 +51,6 @@ check: fmt-check vet tidy-check staticcheck errcheck vulncheck test-race build s
 self-plan:
     go run ./cmd/gala plan
 
-# Run the CLI from ./bin.
+# Run the CLI.
 run +ARGS:
     go run ./cmd/gala {{ARGS}}
