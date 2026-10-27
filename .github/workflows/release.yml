@@ -1,0 +1,48 @@
+# gala — release
+#
+# A promotion that lands on main cuts the release: plan, write the changelog,
+# bump, commit (skip-ci marker in the body), annotate, push atomically,
+# fast-forward dev, and create the GitHub Release. publish = false in
+# gala.toml, so there is no registry step.
+#
+# Pushes made with GITHUB_TOKEN do not trigger further workflow runs, so the
+# release commit and the dev sync cannot loop back into this workflow.
+
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    # Job-level elevation: commit, tag, push the dev sync, and create the
+    # GitHub Release all need write access to the repository.
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (gala reads tags and history)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: go run ./cmd/gala release

@@ -1,0 +1,9 @@
+# Build output
+/bin/
+
+# Test artifacts
+coverage.out
+*.test
+
+# Local-only design document (see README for the build plan status)
+/PLAN.md

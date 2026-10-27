@@ -1,0 +1,22 @@
+# gala's own release configuration: it releases itself from day one.
+#
+# kind: a single package; manager: Go modules, where the tag is the publish.
+kind = "app"
+manager = "go"
+
+# Registry pushes are opt-in; gala does not publish to a package registry.
+publish = false
+
+# One GitHub Release per released tag; needs GITHUB_TOKEN or GH_TOKEN.
+githubRelease = true
+
+# A release only cuts from main (the promotion target), never from dev.
+releaseBranches = ["main"]
+
+# After the push, fast-forward dev onto the release commit so both branches
+# agree on the release. A plain push: non-fast-forward is rejected, never forced.
+syncBranch = "dev"
+
+tagPrefix = "v"
+changelog = "CHANGELOG.md"
+remote = "origin"

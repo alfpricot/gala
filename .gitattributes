@@ -1,0 +1,339 @@
+# standard .gitattributes, last update: 2026-10-08, melon
+
+# GitHub Linguist
+# Controls how GitHub classifies files in the repository language bar.
+# See: https://github.com/github-linguist/linguist
+
+# ---------------------------------------------------------------------------
+# Defaults
+# ---------------------------------------------------------------------------
+
+# Normalize line endings on commit; Git auto-detects binary files.
+*                        text=auto
+
+# ---------------------------------------------------------------------------
+# Git hooks — LF so they execute as shell scripts on every platform
+# ---------------------------------------------------------------------------
+
+.husky/**                text eol=lf
+.githooks/**             text eol=lf
+
+# ---------------------------------------------------------------------------
+# Shell scripts — LF on every platform
+# ---------------------------------------------------------------------------
+
+.bashrc                  text eol=lf linguist-detectable=true linguist-language=Shell
+.bash_login              text eol=lf linguist-detectable=true linguist-language=Shell
+.bash_profile            text eol=lf linguist-detectable=true linguist-language=Shell
+*.bash                   text eol=lf linguist-language=Shell
+*.envsh                  text eol=lf linguist-language=Shell
+*.fish                   text eol=lf linguist-language=Shell
+*.ksh                    text eol=lf linguist-language=Shell
+*.sh                     text eol=lf linguist-language=Shell
+*.shell                  text eol=lf linguist-language=Shell
+*.zsh                    text eol=lf linguist-language=Shell
+
+# ---------------------------------------------------------------------------
+# Windows scripts — CRLF so they run correctly on Windows
+# ---------------------------------------------------------------------------
+
+*.bat                    text eol=crlf
+*.cmd                    text eol=crlf
+*.ps1                    text eol=crlf linguist-language=PowerShell
+*.psd1                   text eol=crlf linguist-language=PowerShell
+*.psm1                   text eol=crlf linguist-language=PowerShell
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+
+*.py                     text eol=lf linguist-language=Python
+*.pyi                    text eol=lf linguist-language=Python
+
+# ---------------------------------------------------------------------------
+# Rust
+# ---------------------------------------------------------------------------
+
+*.rs                     text eol=lf linguist-language=Rust
+
+# ---------------------------------------------------------------------------
+# Go
+# ---------------------------------------------------------------------------
+
+*.go                     text eol=lf linguist-language=Go
+go.mod                   text eol=lf linguist-language=go.mod
+go.sum                   text eol=lf linguist-generated=true
+
+# ---------------------------------------------------------------------------
+# C / C++ — native tree-sitter parsers and node-gyp bindings
+# ---------------------------------------------------------------------------
+
+*.c                      text eol=lf linguist-language=C
+*.cc                     text eol=lf linguist-language=C++
+*.cpp                    text eol=lf linguist-language=C++
+*.h                      text eol=lf
+*.hpp                    text eol=lf
+*.gyp                    text eol=lf
+*.scm                    text eol=lf
+
+# ---------------------------------------------------------------------------
+# C# / .NET
+# ---------------------------------------------------------------------------
+
+*.cs                     text eol=lf linguist-language=C#
+*.csx                    text eol=lf linguist-language=C#
+*.csproj                 text eol=lf
+*.cshtml                 text eol=lf linguist-language=HTML+Razor
+*.sln                    text eol=lf
+*.props                  text eol=lf
+*.targets                text eol=lf
+*.resx                   text eol=lf
+*.xaml                   text eol=lf
+*.razor                  text eol=lf linguist-language=HTML+Razor
+*.config                 text eol=lf
+*.runsettings            text eol=lf
+
+# ---------------------------------------------------------------------------
+# VB.NET / ASP.NET
+# ---------------------------------------------------------------------------
+
+*.vb                     text eol=lf linguist-language=vb.net
+*.vbhtml                 text eol=lf linguist-language=vb.net
+*.vbproj                 text eol=lf
+*.asax                   text eol=lf linguist-language=aspx
+*.aspx                   text eol=lf linguist-language=aspx
+*.ascx                   text eol=lf linguist-language=aspx
+*.ashx                   text eol=lf linguist-language=aspx
+*.asmx                   text eol=lf linguist-language=aspx
+*.master                 text eol=lf linguist-language=aspx
+
+# ---------------------------------------------------------------------------
+# Web source files
+# ---------------------------------------------------------------------------
+
+*.cjs                    text eol=lf linguist-language=JavaScript
+*.css                    text eol=lf linguist-language=CSS
+*.cts                    text eol=lf linguist-language=TypeScript
+*.htm                    text eol=lf linguist-language=HTML
+*.html                   text eol=lf linguist-language=HTML
+*.js                     text eol=lf linguist-language=JavaScript
+*.jsx                    text eol=lf linguist-language=JavaScript
+*.json                   text eol=lf linguist-language=JSON
+*.less                   text eol=lf
+*.md                     text eol=lf diff=markdown
+*.mdx                    text eol=lf diff=markdown
+*.mjs                    text eol=lf linguist-language=JavaScript
+*.mts                    text eol=lf linguist-language=TypeScript
+*.scss                   text eol=lf linguist-language=SCSS
+*.ts                     text eol=lf linguist-language=TypeScript
+*.tsx                    text eol=lf linguist-language=TypeScript
+*.yaml                   text eol=lf linguist-language=YAML
+*.yml                    text eol=lf linguist-language=YAML
+
+# ---------------------------------------------------------------------------
+# Agent skill instructions
+# ---------------------------------------------------------------------------
+
+SKILL.md                 text eol=lf diff=markdown linguist-detectable=true linguist-documentation=false
+
+# ---------------------------------------------------------------------------
+# Data and configuration formats
+# ---------------------------------------------------------------------------
+
+*.conf                   text eol=lf
+*.csv                    text eol=lf
+*.geojson                text eol=lf -diff
+*.gql                    text eol=lf
+*.graphql                text eol=lf
+*.graphqls               text eol=lf
+*.ini                    text eol=lf linguist-language=INI
+*.jsonc                  text eol=lf linguist-language=jsonc
+*.log                    text eol=lf linguist-detectable=false
+*.sql                    text eol=lf linguist-language=SQL
+*.template               text eol=lf
+*.toml                   text eol=lf linguist-language=TOML
+*.txt                    text eol=lf
+*.xml                    text eol=lf linguist-language=XML
+
+# ---------------------------------------------------------------------------
+# Containers and infrastructure
+# ---------------------------------------------------------------------------
+
+*.bicep                  text eol=lf linguist-language=Bicep
+*.bicepparam             text eol=lf linguist-language=Bicep
+Containerfile            text eol=lf
+Dockerfile               text eol=lf
+*.Containerfile          text eol=lf
+*.Dockerfile             text eol=lf
+*.containerfile          text eol=lf
+*.dockerfile             text eol=lf
+
+# ---------------------------------------------------------------------------
+# Build files
+# ---------------------------------------------------------------------------
+
+GNUmakefile              text eol=lf linguist-language=Makefile
+Makefile                 text eol=lf linguist-language=Makefile
+makefile                 text eol=lf linguist-language=Makefile
+Justfile                 text eol=lf linguist-language=Just
+justfile                 text eol=lf linguist-language=Just
+
+# ---------------------------------------------------------------------------
+# Lock files — normalize line endings (text does not suppress diffs)
+# ---------------------------------------------------------------------------
+
+*.lock                   text
+
+# ---------------------------------------------------------------------------
+# Repository configuration and metadata (excluded from git archives)
+# ---------------------------------------------------------------------------
+
+.dockerignore            text eol=lf export-ignore linguist-detectable=false
+.editorconfig            text eol=lf export-ignore linguist-detectable=false
+.fallowrc.jsonc          text eol=lf export-ignore linguist-detectable=false
+.gitattributes           text eol=lf export-ignore linguist-detectable=false
+.gitignore               text eol=lf export-ignore linguist-detectable=false
+.gitlint                 text eol=lf export-ignore linguist-detectable=false
+.markdownlint-cli2.yaml  text eol=lf export-ignore linguist-detectable=false
+.node-version            text eol=lf export-ignore linguist-detectable=false
+.npmrc                   text eol=lf export-ignore linguist-detectable=false
+.nvmrc                   text eol=lf export-ignore linguist-detectable=false
+.pre-commit-config.yaml  text eol=lf export-ignore linguist-detectable=false
+.prettierignore          text eol=lf export-ignore linguist-detectable=false
+.python-version          text eol=lf export-ignore linguist-detectable=false
+.releaserc.json          text eol=lf export-ignore linguist-detectable=false
+.secrets.baseline        text eol=lf export-ignore linguist-detectable=false
+.sops.yaml               text eol=lf export-ignore linguist-detectable=false
+CODEOWNERS               text eol=lf export-ignore linguist-detectable=false
+
+# ---------------------------------------------------------------------------
+# Local development configuration (excluded from git archives)
+# ---------------------------------------------------------------------------
+
+.code-workspace          text eol=lf export-ignore linguist-detectable=false
+.env                     text eol=lf export-ignore linguist-detectable=false
+.env.*                   text eol=lf export-ignore linguist-detectable=false
+.env.example             text eol=lf export-ignore linguist-detectable=false
+.eslintignore            text eol=lf export-ignore linguist-detectable=false
+.gitkeep                 text eol=lf export-ignore linguist-detectable=false
+.npmignore               text eol=lf export-ignore linguist-detectable=false
+.shellcheckrc            text eol=lf export-ignore linguist-detectable=false
+tsconfig.json            text eol=lf export-ignore linguist-detectable=false
+tsconfig.*.json          text eol=lf export-ignore linguist-detectable=false
+
+# ---------------------------------------------------------------------------
+# Documentation
+# ---------------------------------------------------------------------------
+
+CONTRIBUTING.md          text eol=lf linguist-documentation=true
+LICENSE                  text eol=lf linguist-documentation=true
+LICENSE.md               text eol=lf linguist-documentation=true
+README.md                text eol=lf linguist-documentation=true
+SECURITY.md              text eol=lf linguist-documentation=true
+
+# ---------------------------------------------------------------------------
+# Documentation excluded from language statistics
+# ---------------------------------------------------------------------------
+
+CHANGELOG.md             text eol=lf linguist-generated=true linguist-documentation=true
+docs/**                  linguist-documentation=true
+
+# ---------------------------------------------------------------------------
+# Vector graphics (text-based)
+# ---------------------------------------------------------------------------
+
+*.svg                    text eol=lf
+
+# ---------------------------------------------------------------------------
+# Binary files — the "binary" macro expands to -diff -merge -text
+# ---------------------------------------------------------------------------
+
+# Archives
+*.7z                     binary
+*.gz                     binary
+*.rar                    binary
+*.zip                    binary
+
+# Databases and binary data
+*.bin                    binary
+*.db                     binary
+*.db-shm                 binary
+*.db-wal                 binary
+*.sqlite                 binary
+*.sqlite3                binary
+
+# Documents
+*.doc                    binary
+*.docx                   binary
+*.pdf                    binary
+*.xls                    binary
+*.xlsx                   binary
+
+# Images
+*.avif                   binary
+*.bmp                    binary
+*.gif                    binary
+*.ico                    binary
+*.jpeg                   binary
+*.jpg                    binary
+*.png                    binary
+*.tif                    binary
+*.tiff                   binary
+*.webp                   binary
+
+# Audio
+*.mp3                    binary
+*.wav                    binary
+
+# Video
+*.mov                    binary
+*.mp4                    binary
+*.webm                   binary
+
+# Fonts
+*.eot                    binary
+*.otf                    binary
+*.ttf                    binary
+*.woff                   binary
+*.woff2                  binary
+
+# WebAssembly
+*.wasm                   binary
+
+# Machine learning and data science artifacts
+*.h5                     binary
+*.npy                    binary
+*.npz                    binary
+*.onnx                   binary
+*.parquet                binary
+*.pkl                    binary
+*.pt                     binary
+*.pth                    binary
+
+# Native binaries and libraries
+*.dll                    binary
+*.dylib                  binary
+*.exe                    binary
+*.node                   binary
+*.so                     binary
+
+# ---------------------------------------------------------------------------
+# Generated files — excluded from language statistics (export-ignore entries also leave git archives)
+# ---------------------------------------------------------------------------
+
+**/src/parser.c          linguist-generated=true
+**/src/grammar.json      linguist-generated=true
+**/src/node-types.json   linguist-generated=true
+*.map                    text eol=lf linguist-generated=true
+*.min.css                linguist-generated=true
+*.min.js                 linguist-generated=true
+*.min.mjs                linguist-generated=true
+*.snap                   text eol=lf linguist-generated=true
+*.tsbuildinfo            text eol=lf linguist-generated=true export-ignore
+.yarn/**                 linguist-generated=true export-ignore
+Cargo.lock               linguist-generated=true
+bun.lockb                binary
+package-lock.json        linguist-generated=true
+pnpm-lock.yaml           linguist-generated=true
+uv.lock                  linguist-generated=true
+yarn.lock                linguist-generated=true export-ignore

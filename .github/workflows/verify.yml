@@ -1,0 +1,62 @@
+# gala — verify
+#
+# The full gate on every pull request: formatting, vet, module tidiness,
+# staticcheck, errcheck, govulncheck, race-enabled tests, a build, and finally
+# gala planning its own next release (the self-hosting smoke test).
+# Target: under 5 minutes.
+
+name: verify
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (tags matter for the self-plan)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: test -z "$(gofmt -l cmd internal)" || { gofmt -l cmd internal; exit 1; }
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go mod tidy -diff
+        run: go mod tidy -diff
+
+      - name: staticcheck
+        run: go tool staticcheck ./...
+
+      - name: errcheck
+        run: go tool errcheck -ignoretests ./...
+
+      - name: govulncheck
+        run: go tool govulncheck ./...
+
+      - name: test -race
+        run: go test -race ./... -count=1
+
+      - name: build
+        run: go build ./...
+
+      - name: self-plan (gala plans its own next release)
+        run: go run ./cmd/gala plan
