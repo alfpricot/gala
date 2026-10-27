@@ -121,10 +121,16 @@ func TestRefs(t *testing.T) {
 	if !reflect.DeepEqual(f.Refs, []string{"#7"}) {
 		t.Errorf("Refs = %v, want [#7] — prose numbers must not count", f.Refs)
 	}
-	// A footer keyword only counts at the start of a line.
+	// A footer keyword only counts at the start of a line, followed directly
+	// by the reference: mid-line keywords and keyword-led prose are not refs.
 	mid := Parse("abc", "fix: subject", "the phrase closes #8 appears mid-line")
 	if len(mid.Refs) != 0 {
 		t.Errorf("Refs = %v, want none — a mid-line keyword is prose", mid.Refs)
+	}
+	prose := Parse("abc", "fix: subject",
+		"Ref extraction scanned the whole message, so an illustrative (#42) in body prose\nbecame a changelog reference.")
+	if len(prose.Refs) != 0 {
+		t.Errorf("Refs = %v, want none — a keyword-led sentence is prose", prose.Refs)
 	}
 }
 

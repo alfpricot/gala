@@ -55,8 +55,11 @@ var (
 	// with a closure keyword (Closes #7, fixes: #8) — a number mentioned in
 	// prose is not a reference.
 	refRe = regexp.MustCompile(`#\d+`)
-	// footerRef matches the keyword that introduces references in a body line.
-	footerRef = regexp.MustCompile(`(?i)^(?:closes?|fixed?|fixes|resolves?|refs?|references|implements)(?:\s*:\s*|\s+)(.*)$`)
+	// footerRef matches a line that is a closure footer: keyword, optional
+	// colon, then the reference itself ("Closes #7", "Fixes: #8"). A keyword
+	// that is followed by anything other than a # is prose ("Ref extraction
+	// scanned ..."), and so is a keyword mid-line.
+	footerRef = regexp.MustCompile(`(?i)^(?:closes?|fixed?|fixes|resolves?|refs?|references|implements)\s*:?\s*(#\d.*)$`)
 )
 
 // knownTypes is the full policy table: anything not listed is skipped.
