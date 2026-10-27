@@ -51,8 +51,12 @@ var (
 	headerRe = regexp.MustCompile(`^([A-Za-z]+)(\(([^)]*)\))?(!)?:\s(.*)$`)
 	// footer: BREAKING CHANGE: text or BREAKING-CHANGE: text
 	breakingRe = regexp.MustCompile(`(?m)^BREAKING[- ]CHANGE:\s?(.*)$`)
-	// issue-style references anywhere in the message.
+	// issue-style references in the subject, and in a body line that starts
+	// with a closure keyword (Closes #7, fixes: #8) — a number mentioned in
+	// prose is not a reference.
 	refRe = regexp.MustCompile(`#\d+`)
+	// footerRef matches the keyword that introduces references in a body line.
+	footerRef = regexp.MustCompile(`(?i)^(?:closes?|fixed?|fixes|resolves?|refs?|references|implements)(?:\s*:\s*|\s+)(.*)$`)
 )
 
 // knownTypes is the full policy table: anything not listed is skipped.
@@ -100,11 +104,24 @@ func Parse(hash, subject, body string) Commit {
 func collectRefs(parts ...string) []string {
 	var refs []string
 	seen := make(map[string]bool)
-	for _, p := range parts {
-		for _, r := range refRe.FindAllString(p, -1) {
+	add := func(text string) {
+		for _, r := range refRe.FindAllString(text, -1) {
 			if !seen[r] {
 				seen[r] = true
 				refs = append(refs, r)
+			}
+		}
+	}
+
+	// Subject: any #N counts — that is where a changelog bullet points.
+	add(parts[0])
+
+	// Body: only a line that starts with a closure keyword contributes. The
+	// same line can carry several references ("closes #7 and #42").
+	if len(parts) > 1 {
+		for _, line := range strings.Split(parts[1], "\n") {
+			if m := footerRef.FindStringSubmatch(line); m != nil {
+				add(m[1])
 			}
 		}
 	}
