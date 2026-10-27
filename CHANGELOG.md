@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1 (2026-10-27)
+
+### Bug Fixes
+
+* require the reference right after a closure keyword (#5)
+* read refs from the subject and closure footers only (#4)
+* stop repeating refs and tidy the no-release reason (#3)
+
 ## 0.1.0 (2026-10-27)
 
 ### Features
