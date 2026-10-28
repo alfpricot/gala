@@ -73,7 +73,7 @@ The main path: `cmd/gala` → `release.Run` → read git history and tags → pl
 ## Build, test, release, and deploy
 
 - **`verify.yml`** runs on pull requests and manual dispatch. It checks formatting, `go vet`, `go mod tidy -diff`, staticcheck, errcheck, govulncheck, `go test -race`, and a build, then runs `gala plan` on its own repository.
-- **`release.yml`** runs on pushes to `main` and manual dispatch, and runs `gala release` with `GITHUB_TOKEN`. gala releases itself: changelog, tag, push, `dev` fast-forward, and GitHub Release, with no registry step (`publish = false` in `gala.toml`).
+- **`release.yml`** runs on pushes to `main` and manual dispatch, and runs `gala release` with `GITHUB_TOKEN`. gala releases itself: changelog, tag, push, `dev` fast-forward, and GitHub Release, with no registry step (`publish = false` in `.gala.toml`).
 - `just check` runs the same gate locally.
 
 ## Where things live
@@ -82,7 +82,7 @@ The main path: `cmd/gala` → `release.Run` → read git history and tags → pl
 | --- | --- |
 | `cmd/gala/` | CLI entry point, flag parsing, help text |
 | `internal/` | All library packages listed above |
-| `gala.toml` | gala's own release configuration |
+| `.gala.toml` | gala's own release configuration |
 | `justfile` | Local build and check recipes |
 | `.github/workflows/` | `verify.yml` and `release.yml` |
 | `docs/` | Configuration reference and release process |
