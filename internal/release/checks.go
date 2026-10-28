@@ -62,6 +62,9 @@ func (e *Engine) preflight(plan *Plan, allowPublish bool) error {
 	if err := checkHookPaths(hookPaths); err != nil {
 		return err
 	}
+	if err := e.checkBatchArgs(plan.Due()); err != nil {
+		return err
+	}
 
 	// Ecosystem preflights: npm verifies the registry login when publishing
 	// is on, and nuget the evaluated version, packability, and push source,

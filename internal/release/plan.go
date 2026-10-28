@@ -26,6 +26,10 @@ type Engine struct {
 
 	branch    string
 	branchErr error
+
+	// outputWritten records that the release's GITHUB_OUTPUT step outputs
+	// were written, so Run does not add released=false after them.
+	outputWritten bool
 }
 
 // Open loads the config, resolves the repo root, and picks the adapter. It is

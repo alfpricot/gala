@@ -3,7 +3,10 @@ package release
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/alfpricot/gala/internal/config"
@@ -123,10 +126,92 @@ func (e *Engine) hookTools(due []*PackagePlan) (onPath []string, byPath []string
 	return onPath, byPath
 }
 
+// checkHookPaths resolves each path-named hook the way os/exec will at run
+// time: on Windows that tries the PATHEXT extensions (./scripts/build finds
+// build.cmd), and elsewhere it requires the executable bit.
 func checkHookPaths(byPath []string) error {
 	for _, p := range byPath {
-		if _, err := os.Stat(p); err != nil {
-			return fmt.Errorf("hook command %s was not found: %w", p, err)
+		resolved, err := exec.LookPath(p)
+		if err != nil {
+			return fmt.Errorf("hook command %s was not found or is not executable: %w", p, err)
+		}
+		if err := startableOnWindows(runtime.GOOS, resolved, os.Getenv("PATHEXT")); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// startableOnWindows refuses a path-named hook whose extension Windows cannot
+// start directly. LookPath accepts any existing file that has an extension,
+// but CreateProcess runs only executables and batch files, so a ./gen.ps1 or
+// ./gen.sh would pass the preflight and then fail after the version writes.
+func startableOnWindows(goos, program, pathext string) error {
+	if goos != "windows" {
+		return nil
+	}
+	if pathext == "" {
+		pathext = ".COM;.EXE;.BAT;.CMD"
+	}
+	ext := strings.ToLower(filepath.Ext(program))
+	for _, e := range strings.Split(strings.ToLower(pathext), ";") {
+		if e != "" && e == ext {
+			return nil
+		}
+	}
+	return fmt.Errorf("hook command %s cannot be started directly on Windows (%s is not in PATHEXT) — "+
+		"name its interpreter as the program instead, such as `pwsh -File %s`",
+		program, ext, filepath.ToSlash(program))
+}
+
+// checkBatchArgs refuses hook arguments that cmd.exe would interpret. On
+// Windows a .cmd or .bat program (npm, npx, and pnpm are npm.cmd and the
+// like) runs through cmd.exe, which expands %VAR% even inside quotes and
+// treats & | < > ^ as operators, so the "nothing is expanded" promise only
+// holds if such arguments never reach it.
+func (e *Engine) checkBatchArgs(due []*PackagePlan) error {
+	// Elsewhere a .cmd or .bat file is an ordinary executable that receives
+	// its arguments unchanged.
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	for _, s := range e.scopes(due) {
+		for _, cmd := range slices.Concat(s.hooks.PreRelease, s.hooks.PostBump) {
+			program := cmd.Argv[0]
+			if strings.ContainsAny(program, `/\`) && !filepath.IsAbs(program) {
+				program = filepath.Join(s.dir, filepath.FromSlash(program))
+			}
+			resolved, err := exec.LookPath(program)
+			if err != nil {
+				continue // reported by the tool and path checks
+			}
+			if err := batchArgError(resolved, cmd.Argv[1:]); err != nil {
+				return fmt.Errorf("hook command %q: %w", cmd.Line, err)
+			}
+		}
+	}
+	return nil
+}
+
+// batchUnsafe are the characters cmd.exe interprets in a batch file's
+// arguments: % expands variables even inside quotes, a " breaks the quoting
+// os/exec adds, and the rest are operators outside quotes.
+const batchUnsafe = "%\"&|<>^\r\n"
+
+// batchArgError reports an argument cmd.exe would interpret when program is a
+// batch file; any other program receives its arguments unchanged.
+func batchArgError(program string, args []string) error {
+	switch strings.ToLower(filepath.Ext(program)) {
+	case ".cmd", ".bat":
+	default:
+		return nil
+	}
+	for _, a := range args {
+		if strings.ContainsAny(a, batchUnsafe) {
+			return fmt.Errorf("argument %q would be interpreted by cmd.exe, because %s is a batch file — "+
+				"move that argument into a package script (`npm run …`) or a checked-in script, or name an "+
+				"interpreter that is an .exe as the program, such as `pwsh -File script.ps1`",
+				a, filepath.Base(program))
 		}
 	}
 	return nil
@@ -224,11 +309,20 @@ func hookLabel(key string) string {
 	return "run"
 }
 
-// writeGitHubOutput appends step outputs for a workflow: released, and when a
-// release happened, tag (the single tag of a one-package release), tags (one
-// per line), and version (an app's new version).
+// writeGitHubOutput appends the release's step outputs once the tags are
+// pushed. It marks the outputs written first, so Run never follows a failed
+// write with released=false for a release whose tags exist.
 func (e *Engine) writeGitHubOutput(due []*PackagePlan) error {
-	if e.opts.GitHubOutput == "" {
+	e.outputWritten = true
+	return appendGitHubOutput(e.opts.GitHubOutput, e.cfg.Kind == config.KindApp, due)
+}
+
+// appendGitHubOutput appends step outputs for a workflow: released, and when
+// a release happened, tag (the single tag of a one-package release), tags
+// (one per line), and version (an app's new version). An empty file writes
+// nothing.
+func appendGitHubOutput(file string, app bool, due []*PackagePlan) error {
+	if file == "" {
 		return nil
 	}
 	var b strings.Builder
@@ -239,7 +333,7 @@ func (e *Engine) writeGitHubOutput(due []*PackagePlan) error {
 		if len(due) == 1 {
 			fmt.Fprintf(&b, "tag=%s\n", due[0].NextTag)
 		}
-		if e.cfg.Kind == config.KindApp {
+		if app {
 			fmt.Fprintf(&b, "version=%s\n", due[0].Next)
 		}
 		b.WriteString("tags<<GALA_TAGS\n")
@@ -248,7 +342,7 @@ func (e *Engine) writeGitHubOutput(due []*PackagePlan) error {
 		}
 		b.WriteString("GALA_TAGS\n")
 	}
-	f, err := os.OpenFile(e.opts.GitHubOutput, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("cannot open GITHUB_OUTPUT: %w", err)
 	}
