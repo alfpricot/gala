@@ -5,8 +5,12 @@
 # fast-forward dev, and create the GitHub Release. publish = false in
 # .gala.toml, so there is no registry step.
 #
-# Pushes made with GITHUB_TOKEN do not trigger further workflow runs, so the
-# release commit and the dev sync cannot loop back into this workflow.
+# The pushes go over the RELEASE_DEPLOY_KEY deploy key: the repository's
+# rulesets block direct pushes to main and dev and creating v* tags, and on a
+# personal-account repository a deploy key is the bypass actor available to a
+# workflow (GitHub Actions itself can only be one inside an organization).
+# Deploy-key pushes do trigger workflows, so the skip-ci marker in the release
+# commit body is what keeps the release commit from re-running this workflow.
 
 name: release
 
@@ -24,8 +28,8 @@ permissions:
 
 jobs:
   release:
-    # Job-level elevation: commit, tag, push the dev sync, and create the
-    # GitHub Release all need write access to the repository.
+    # Job-level elevation: creating the GitHub Release through GITHUB_TOKEN
+    # needs write access (the git pushes authenticate with the deploy key).
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -35,6 +39,9 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          # origin becomes an SSH remote authenticated by the deploy key, so
+          # gala's atomic push and dev sync use the ruleset bypass.
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
 
       - name: Set up Go
         uses: actions/setup-go@v6
