@@ -22,6 +22,8 @@ You need Go 1.27.3 or newer (see `go.mod`), `git`, and [`just`](https://github.c
 just check
 ```
 
+If it stops at the formatting check, `just fmt` rewrites every Go file in place. `just build` writes the binary to `./bin/gala`.
+
 `just check` runs gofmt, `go vet`, `go mod tidy -diff`, staticcheck, errcheck, govulncheck, `go test -race`, a build, and a self-plan. It matches the steps in `.github/workflows/verify.yml`, which runs on every pull request.
 
 ## Pull requests
