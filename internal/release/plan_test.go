@@ -314,6 +314,55 @@ func TestMissingConfig(t *testing.T) {
 	mustContain(t, err.Error(), "gala.toml", "the error names the file")
 }
 
+// TestDotfileConfig: .gala.toml is a first-class config file, discovered when
+// gala.toml is absent.
+func TestDotfileConfig(t *testing.T) {
+	r, cleanup, err := gittest.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if err := r.WriteFile(".gala.toml", appConfig); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CommitAll("chore: add gala config"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CommitFile("app.go", "package app\n", "feat: first feature"); err != nil {
+		t.Fatal(err)
+	}
+	opts, _, _ := testOptions(r, nil)
+	if err := Run(opts, ModePlan); err != nil {
+		t.Fatalf(".gala.toml must be discovered: %v", err)
+	}
+}
+
+// TestBothConfigNames: a repo with both names fails loudly rather than
+// letting a stale file pick the release.
+func TestBothConfigNames(t *testing.T) {
+	r, cleanup, err := gittest.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if err := r.WriteFile("gala.toml", appConfig); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.WriteFile(".gala.toml", appConfig); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CommitAll("chore: add two configs"); err != nil {
+		t.Fatal(err)
+	}
+	opts, _, _ := testOptions(r, nil)
+	err = Run(opts, ModePlan)
+	if err == nil {
+		t.Fatal("a repo with both config file names must error")
+	}
+	mustContain(t, err.Error(), "both", "the error says the choice is ambiguous")
+	mustContain(t, err.Error(), ".gala.toml", "the error names the dotfile")
+}
+
 // TestConfigPathOverride: --config wins over discovery.
 func TestConfigPathOverride(t *testing.T) {
 	r, _, cleanup := fixture(t, appConfig)

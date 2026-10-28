@@ -46,7 +46,11 @@ func Open(opts *Options) (*Engine, error) {
 
 	cfgPath := opts.ConfigPath
 	if cfgPath == "" {
-		cfgPath = filepath.Join(root, config.ConfigName)
+		found, ferr := config.Find(root)
+		if ferr != nil {
+			return nil, ferr
+		}
+		cfgPath = found
 	} else if !filepath.IsAbs(cfgPath) {
 		cfgPath = filepath.Join(abs, cfgPath)
 	}
