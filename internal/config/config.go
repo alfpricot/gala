@@ -4,7 +4,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -260,8 +262,14 @@ const (
 func Find(root string) (string, error) {
 	found := make([]string, 0, 2)
 	for _, name := range []string{ConfigName, DotConfigName} {
-		if _, err := os.Stat(filepath.Join(root, name)); err == nil {
+		candidate := filepath.Join(root, name)
+		// Lstat reports the name itself, so a dangling symlink still counts
+		// as present and the two-name guard stays honest. Any other
+		// inspection failure is reported, never read as absence.
+		if _, err := os.Lstat(candidate); err == nil {
 			found = append(found, name)
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("%s: cannot inspect config file: %w", candidate, err)
 		}
 	}
 	switch len(found) {

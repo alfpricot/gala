@@ -175,6 +175,18 @@ func TestFind(t *testing.T) {
 		}
 	})
 
+	t.Run("dangling symlink", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.Symlink(filepath.Join(root, "gone.toml"), filepath.Join(root, ConfigName)); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		write(t, root, DotConfigName)
+		_, err := Find(root)
+		if err == nil || !strings.Contains(err.Error(), "both") {
+			t.Errorf("a dangling %s must still count as present, got %v", ConfigName, err)
+		}
+	})
+
 	t.Run("both names", func(t *testing.T) {
 		root := t.TempDir()
 		write(t, root, ConfigName)
