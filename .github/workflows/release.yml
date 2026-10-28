@@ -3,7 +3,18 @@
 # A promotion that lands on main cuts the release: plan, write the changelog,
 # bump, commit (skip-ci marker in the body), annotate, push atomically,
 # fast-forward dev, and create the GitHub Release. publish = false in
-# .gala.toml, so there is no registry step.
+# .gala.toml, so gala itself has no registry step; when the run tagged a
+# release, the steps after it publish gala to GitHub Packages as npm packages:
+# one @alfpricot/gala-<os>-<arch> package per entry in npm/platforms.json, each
+# holding that platform's prebuilt binary and limited to it by os/cpu, and the
+# @alfpricot/gala wrapper, which lists them all as optionalDependencies so npm
+# installs only the one matching the consumer's machine. Go cross-compiles, so
+# every binary comes from this one Linux runner.
+#
+# A publish that fails after the tag is pushed is retried by dispatching this
+# workflow on main: gala finds nothing due, HEAD is still the tagged release
+# commit, and the publish runs again. A version already in the registry is
+# skipped, so a re-run never fails on it.
 #
 # The pushes go over the RELEASE_DEPLOY_KEY deploy key: the repository's
 # rulesets block direct pushes to main and dev and creating v* tags, and on a
@@ -29,9 +40,11 @@ permissions:
 jobs:
   release:
     # Job-level elevation: creating the GitHub Release through GITHUB_TOKEN
-    # needs write access (the git pushes authenticate with the deploy key).
+    # needs write access (the git pushes authenticate with the deploy key),
+    # and publishing to GitHub Packages needs packages: write.
     permissions:
       contents: write
+      packages: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -60,3 +73,40 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: go run ./cmd/gala release
+
+      - name: Find the released tag
+        id: tag
+        # Empty when nothing was due: HEAD is then the promotion merge, which
+        # carries no tag.
+        run: echo "tag=$(git tag --points-at HEAD --list 'v*' | head -n 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node (GitHub Packages registry)
+        if: steps.tag.outputs.tag != ''
+        uses: actions/setup-node@v5
+        with:
+          node-version: lts/*
+          registry-url: https://npm.pkg.github.com
+          scope: "@alfpricot"
+
+      - name: Publish the npm packages
+        # Platform packages first, the wrapper last, so the wrapper is never
+        # visible while a dependency it names is missing. A version already in
+        # the registry is skipped, so a re-run after a partial failure picks up
+        # where the last one stopped.
+        if: steps.tag.outputs.tag != ''
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -eu
+          version="${TAG#v}"
+          out="$RUNNER_TEMP/npm-package"
+          sh npm/build.sh "$version" "$out"
+          for dir in "$out"/packages/* "$out"; do
+            name="$(node -p "require('$dir/package.json').name")"
+            if [ -n "$(npm view "$name@$version" version 2>/dev/null)" ]; then
+              echo "$name@$version is already published; skipping"
+            else
+              (cd "$dir" && npm publish)
+            fi
+          done

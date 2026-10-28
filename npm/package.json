@@ -1,0 +1,35 @@
+{
+  "name": "@alfpricot/gala",
+  "version": "0.0.0-development",
+  "description": "A small release engine: Conventional Commits in, semver tag, changelog, GitHub Release, and registry publish out. Distributed as a prebuilt binary.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alfpricot/gala.git"
+  },
+  "homepage": "https://github.com/alfpricot/gala#readme",
+  "bin": {
+    "gala": "bin/gala.js"
+  },
+  "files": [
+    "bin/gala.js",
+    "platforms.json"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "@alfpricot/gala-linux-x64": "0.0.0-development",
+    "@alfpricot/gala-linux-arm64": "0.0.0-development",
+    "@alfpricot/gala-darwin-x64": "0.0.0-development",
+    "@alfpricot/gala-darwin-arm64": "0.0.0-development",
+    "@alfpricot/gala-win32-x64": "0.0.0-development",
+    "@alfpricot/gala-win32-arm64": "0.0.0-development"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}

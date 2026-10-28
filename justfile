@@ -45,11 +45,15 @@ test-race:
     go test -race ./... -count=1
 
 # The whole gate, in the same order CI runs it.
-check: fmt-check vet tidy-check staticcheck errcheck vulncheck test-race build self-plan
+check: fmt-check vet tidy-check staticcheck errcheck vulncheck test-race build self-plan npm-test
 
 # gala plans its own next release: the self-hosting smoke test.
 self-plan:
     go run ./cmd/gala plan
+
+# The npm wrapper and per-platform manifests agree with npm/platforms.json.
+npm-test:
+    cd npm && node --test
 
 # Run the CLI.
 run +ARGS:
