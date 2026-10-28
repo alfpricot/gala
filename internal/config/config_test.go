@@ -127,6 +127,70 @@ func TestValidatePackageDirs(t *testing.T) {
 	}
 }
 
+// TestFind: discovery takes either name, and refuses both ambiguous cases
+// instead of guessing — a stale file silently winning is the whole point of
+// the strictness.
+func TestFind(t *testing.T) {
+	write := func(t *testing.T, root, name string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, name), []byte("kind = \"app\"\nmanager = \"go\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("neither name", func(t *testing.T) {
+		root := t.TempDir()
+		_, err := Find(root)
+		if err == nil {
+			t.Fatal("a directory with no config file must error")
+		}
+		for _, want := range []string{"no config file", ConfigName, DotConfigName} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error should mention %q: %v", want, err)
+			}
+		}
+	})
+
+	t.Run("plain name", func(t *testing.T) {
+		root := t.TempDir()
+		write(t, root, ConfigName)
+		got, err := Find(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := filepath.Join(root, ConfigName); got != want {
+			t.Errorf("Find = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("dotfile", func(t *testing.T) {
+		root := t.TempDir()
+		write(t, root, DotConfigName)
+		got, err := Find(root)
+		if err != nil {
+			t.Fatalf(".gala.toml must be discoverable on its own: %v", err)
+		}
+		if want := filepath.Join(root, DotConfigName); got != want {
+			t.Errorf("Find = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("both names", func(t *testing.T) {
+		root := t.TempDir()
+		write(t, root, ConfigName)
+		write(t, root, DotConfigName)
+		_, err := Find(root)
+		if err == nil {
+			t.Fatal("two config files must be an error, not a silent preference")
+		}
+		for _, want := range []string{"both", ConfigName, DotConfigName} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error should mention %q: %v", want, err)
+			}
+		}
+	})
+}
+
 func TestOnReleaseBranch(t *testing.T) {
 	cfg, err := load(t, "kind = \"app\"\nmanager = \"go\"\nreleaseBranches = [\"main\", \"release\"]\n")
 	if err != nil {

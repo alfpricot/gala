@@ -42,7 +42,7 @@ gala version
 gala help
 ```
 
-Flags: `--config <path>` (overrides `gala.toml` discovery), `--cwd <dir>` (run against another checkout).
+Flags: `--config <path>` (overrides `gala.toml` / `.gala.toml` discovery), `--cwd <dir>` (run against another checkout).
 
 Exit codes: `0` success or no release due, `1` failure, `2` usage error.
 
@@ -68,7 +68,7 @@ gala → no release: no commits since v0.1.1
 
 ## Configuration
 
-gala reads `gala.toml` at the repository root. A key gala does not know is a hard error. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for every key, default, and a monorepo example.
+gala reads `gala.toml` — or the dotfile `.gala.toml`, for repositories that keep tool config in dotfiles — at the repository root. A repository may have one or the other, never both: two config files is an error, because letting a stale one win silently is the failure gala exists to avoid. A key gala does not know is a hard error. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for every key, default, and a monorepo example.
 
 ## How releases work
 
@@ -83,7 +83,7 @@ How versions are chosen, the order of the release steps, the `dev` → `main` br
 - No branch merging: `syncBranch` only fast-forwards. If commits landed on `dev` during the release, gala warns and prints the manual merge command; it never fails a release over it.
 - No command timeouts: do not interrupt `gala release` during the publish step.
 - Non-GitHub remotes: tags and changelog still work; the GitHub Release step is skipped with a warning.
-- One config file name (`gala.toml`), prose output only.
+- One config file per repository (`gala.toml` or `.gala.toml`, never both), prose output only.
 
 Also out of scope for v1: notifications, commit linting, provenance, workspace glob discovery, JSON output, alternate config formats, `init`/`doctor` commands.
 
