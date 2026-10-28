@@ -38,7 +38,7 @@ Wraps the `git` command line behind an injectable runner. Reads put `--end-of-op
 
 ### [internal/manager](internal/manager)
 
-One adapter each for Go, npm, Cargo, and PyPI (`uv`): read the manifest version, write it back, refresh the lockfile through its owning tool, preflight, and publish. TOML manifests are edited by line (`toledit.go`) to preserve comments and ordering.
+One adapter each for Go, npm, Cargo, PyPI (`uv`), and NuGet (`dotnet`): read the manifest version, write it back, refresh the lockfile through its owning tool, preflight, and publish. TOML manifests are edited by line (`toledit.go`), and .NET project files by element value (`nuget.go`), to preserve comments and ordering.
 
 ### [internal/changelog](internal/changelog)
 
@@ -56,7 +56,7 @@ Test support that builds real git repositories in temporary directories, optiona
 
 - **git.** Every read and write goes through the `git` binary (`internal/git`).
 - **GitHub REST API.** Used only to create releases (`internal/github`), with `GITHUB_TOKEN` or `GH_TOKEN`. Without a token, or on a non-GitHub remote, that step is skipped with a warning.
-- **Package managers.** `npm`, `cargo`, and `uv` run for lockfile refreshes and publishing (`internal/manager`). The Go manager runs no publish, because the tag is the publish.
+- **Package managers.** `npm`, `cargo`, `uv`, and `dotnet` run for lockfile refreshes and publishing (`internal/manager`). The Go manager runs no publish, because the tag is the publish.
 
 The main path: `cmd/gala` → `release.Run` → read git history and tags → plan per package → write manifest, lockfile, and changelog → commit and tag → `git push --atomic` → GitHub Release → registry publish.
 

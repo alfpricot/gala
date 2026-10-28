@@ -97,6 +97,8 @@ func New(name config.ManagerName, r Runner) (Manager, error) {
 		return &cargoManager{r: r}, nil
 	case config.ManagerPyPI:
 		return &pypiManager{r: r}, nil
+	case config.ManagerNuGet:
+		return &nugetManager{r: r}, nil
 	default:
 		return nil, fmt.Errorf("unknown manager %q", name)
 	}
