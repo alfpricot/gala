@@ -10,8 +10,9 @@ import (
 	"github.com/alfpricot/gala/internal/semver"
 )
 
-// cargoManager edits Cargo.toml [package] version with a targeted line edit
-// and leaves Cargo.lock to `cargo update --workspace`.
+// cargoManager edits Cargo.toml [package] version (or [workspace.package]
+// version for a workspace root) with a targeted line edit and leaves
+// Cargo.lock to `cargo update --workspace`.
 type cargoManager struct {
 	r Runner
 }
@@ -33,17 +34,23 @@ func (c *cargoManager) read(dir string) (string, string, error) {
 	return string(data), filepath.ToSlash(path), nil
 }
 
-// ManifestVersion reads [package] version. `version.workspace = true` is
-// refused by name: independent versioning needs an explicit version.
+// ManifestVersion reads [package] version. A virtual workspace (no
+// [package]) or a root package that inherits its version reads
+// [workspace.package] version from the same file instead: the members that
+// inherit it release in lockstep under one version. A member that inherits
+// from a workspace root elsewhere is refused by name: independent versioning
+// needs an explicit version.
 func (c *cargoManager) ManifestVersion(dir string) (semver.Version, bool, error) {
 	content, file, err := c.read(dir)
 	if err != nil {
 		return semver.Version{}, false, err
 	}
-	if v, ok := GetTomlString(content, "package", "version"); ok && !strings.HasPrefix(v, "{") {
+	section, ok := versionSection(content)
+	if ok {
+		v, _ := GetTomlString(content, section, "version")
 		parsed, err := semver.Parse(v)
 		if err != nil {
-			return semver.Version{}, false, fmt.Errorf("%s: [package] version: %w", file, err)
+			return semver.Version{}, false, fmt.Errorf("%s: [%s] version: %w", file, section, err)
 		}
 		return parsed, true, nil
 	}
@@ -51,10 +58,22 @@ func (c *cargoManager) ManifestVersion(dir string) (semver.Version, bool, error)
 	// version = { workspace = true }.
 	if SectionHasKey(content, "package", "version.workspace") || inheritsVersion(content) {
 		return semver.Version{}, false, fmt.Errorf(
-			"%s: [package] sets version.workspace = true; gala releases packages independently, "+
-				"so the manifest needs an explicit version", file)
+			"%s: [package] sets version.workspace = true and this file has no [workspace.package] version; "+
+				"gala releases packages independently, so the manifest needs an explicit version", file)
 	}
-	return semver.Version{}, false, fmt.Errorf("%s: no [package] version found", file)
+	return semver.Version{}, false, fmt.Errorf("%s: no [package] or [workspace.package] version found", file)
+}
+
+// versionSection names the table whose version key gala reads and writes:
+// [package] when it carries an explicit version, otherwise [workspace.package].
+func versionSection(content string) (string, bool) {
+	if v, ok := GetTomlString(content, "package", "version"); ok && !strings.HasPrefix(v, "{") {
+		return "package", true
+	}
+	if _, ok := GetTomlString(content, "workspace.package", "version"); ok {
+		return "workspace.package", true
+	}
+	return "", false
 }
 
 func (c *cargoManager) PackageName(dir string) (string, error) {
@@ -74,7 +93,11 @@ func (c *cargoManager) SetVersion(dir string, v semver.Version) error {
 	if err != nil {
 		return err
 	}
-	edited, err := SetTomlValue(content, "package", "version", v.String())
+	section, ok := versionSection(content)
+	if !ok {
+		return fmt.Errorf("%s: no [package] or [workspace.package] version to write", file)
+	}
+	edited, err := SetTomlValue(content, section, "version", v.String())
 	if err != nil {
 		return fmt.Errorf("%s: %w", file, err)
 	}
@@ -102,7 +125,24 @@ func (c *cargoManager) RefreshLock(dir, root string) ([]string, error) {
 	return locks, nil
 }
 
-func (c *cargoManager) Preflight(string, bool) error { return nil }
+// Preflight refuses to publish a manifest whose version lives in
+// [workspace.package]: `cargo publish` there either rejects the virtual
+// manifest or publishes only the root crate, and either way the tag would
+// already be pushed. The members publish from a workflow instead.
+func (c *cargoManager) Preflight(dir string, publish bool) error {
+	if !publish {
+		return nil
+	}
+	content, file, err := c.read(dir)
+	if err != nil {
+		return err
+	}
+	if section, ok := versionSection(content); ok && section == "workspace.package" {
+		return fmt.Errorf("%s: the version comes from [workspace.package], and gala publishes one crate per "+
+			"package — set publish = false and publish the member crates from a workflow", file)
+	}
+	return nil
+}
 
 func (c *cargoManager) Publish(dir string) error {
 	_, err := c.r.Run(dir, "cargo", "publish")

@@ -2,6 +2,7 @@ package release
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/alfpricot/gala/internal/config"
@@ -64,20 +65,18 @@ func FormatPlan(p *Plan) string {
 
 // FormatDryRun reports exactly what a real run would do, after the preflights
 // have passed and before anything is written.
-func FormatDryRun(e *Engine, p *Plan, publish bool) string {
+func FormatDryRun(e *Engine, p *Plan, allowPublish bool) string {
 	var b strings.Builder
 	due := p.Due()
 
 	b.WriteString("\ndry run — preflights passed; nothing was written\n\n")
 
-	var writes []string
-	for _, pkg := range due {
-		if m := e.mgr.Manifest(pkg.AbsDir, e.root); m != "" {
-			writes = append(writes, fmt.Sprintf("%s → %s", m, pkg.Next))
+	fmt.Fprintf(&b, "  would write   %s\n", describeWrites(e, due))
+	for _, s := range e.scopes(due) {
+		for _, cmd := range s.hooks.PostBump {
+			fmt.Fprintf(&b, "  would run     %s%s\n", cmd.Line, e.where(s))
 		}
 	}
-	writes = append(writes, e.cfg.Changelog)
-	fmt.Fprintf(&b, "  would write   %s\n", strings.Join(writes, ", "))
 
 	subject, _ := releaseCommit(e.cfg.Kind == config.KindMonorepo, due)
 	fmt.Fprintf(&b, "  would commit  %s (skip-ci marker in body)\n", subject)
@@ -97,8 +96,14 @@ func FormatDryRun(e *Engine, p *Plan, publish bool) string {
 	} else {
 		b.WriteString("  would release none (githubRelease = false)\n")
 	}
-	if publish {
-		fmt.Fprintf(&b, "  would publish %d package%s via %s\n", len(due), plural(len(due)), e.mgr.Name())
+	if pubs := publishing(due, allowPublish); len(pubs) > 0 {
+		var via []string
+		for _, pkg := range pubs {
+			if name := pkg.Manager.Name(); !slices.Contains(via, name) {
+				via = append(via, name)
+			}
+		}
+		fmt.Fprintf(&b, "  would publish %d package%s via %s\n", len(pubs), plural(len(pubs)), strings.Join(via, ", "))
 	} else {
 		b.WriteString("  would publish nothing (publish = false)\n")
 	}

@@ -61,6 +61,11 @@ type Options struct {
 	// DefaultOptions.
 	Token string
 
+	// GitHubOutput is the file a release appends its step outputs to
+	// (released, tag, tags, version); read from GITHUB_OUTPUT by
+	// DefaultOptions. Empty writes nothing.
+	GitHubOutput string
+
 	// Now is the clock, for the changelog date.
 	Now func() time.Time
 }
@@ -81,9 +86,10 @@ func DefaultOptions() *Options {
 			_, err := exec.LookPath(name)
 			return err
 		},
-		HTTP:  http.DefaultClient,
-		Token: token,
-		Now:   time.Now,
+		HTTP:         http.DefaultClient,
+		Token:        token,
+		GitHubOutput: os.Getenv("GITHUB_OUTPUT"),
+		Now:          time.Now,
 	}
 }
 
