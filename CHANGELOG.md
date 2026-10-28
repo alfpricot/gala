@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0 (2026-10-28)
+
+### Features
+
+* **manager:** add a nuget manager for .NET packages (#12)
+* read .gala.toml as an alternative config file name (#9)
+
+### Bug Fixes
+
+* keep every monorepo anchor inside the batched log range (#10)
+
 ## 0.1.1 (2026-10-27)
 
 ### Bug Fixes
