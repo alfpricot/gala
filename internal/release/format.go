@@ -79,11 +79,8 @@ func FormatDryRun(e *Engine, p *Plan, publish bool) string {
 	writes = append(writes, e.cfg.Changelog)
 	fmt.Fprintf(&b, "  would write   %s\n", strings.Join(writes, ", "))
 
-	if e.cfg.Kind == config.KindMonorepo {
-		fmt.Fprintf(&b, "  would commit  chore(release): %d packages (skip-ci marker in body)\n", len(due))
-	} else {
-		fmt.Fprintf(&b, "  would commit  chore(release): %s (skip-ci marker in body)\n", due[0].NextTag)
-	}
+	subject, _ := releaseCommit(e.cfg.Kind == config.KindMonorepo, due)
+	fmt.Fprintf(&b, "  would commit  %s (skip-ci marker in body)\n", subject)
 
 	var tags []string
 	for _, pkg := range due {

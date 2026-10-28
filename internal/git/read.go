@@ -242,11 +242,15 @@ func (g *Repo) IsAncestor(ancestor, head string) (bool, error) {
 // monorepo log builds its union range: the intersection of the anchors'
 // ancestor sets is exactly merge-base's, so `mb..HEAD` is a superset of every
 // per-package range (membership is then decided per package with RevList).
+//
+// --octopus is what makes that hold for three or more refs: plain
+// `git merge-base A B C` answers for A against a hypothetical merge of B and
+// C, which can be a descendant of C and so cut C's commits out of the range.
 func (g *Repo) MergeBase(refs ...string) (string, error) {
 	if len(refs) == 0 {
 		return "", fmt.Errorf("merge-base needs at least one ref")
 	}
-	args := append([]string{"merge-base", "--end-of-options"}, refs...)
+	args := append([]string{"merge-base", "--octopus", "--end-of-options"}, refs...)
 	out, err := g.Run(args...)
 	if err != nil {
 		return "", err
