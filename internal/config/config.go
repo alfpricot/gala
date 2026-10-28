@@ -86,10 +86,15 @@ type Hooks struct {
 }
 
 // MatchesPostBumpPath reports whether a repo-relative path is one the postBump
-// commands may change: an exact entry or a path.Match pattern.
+// commands may change: an exact entry, a path.Match pattern, or a file under
+// an entry naming a directory (git status lists every file a hook creates in
+// a new directory by its own path).
 func (h Hooks) MatchesPostBumpPath(p string) bool {
 	for _, pattern := range h.PostBumpPaths {
 		if ok, _ := path.Match(pattern, p); ok {
+			return true
+		}
+		if strings.HasPrefix(p, pattern+"/") {
 			return true
 		}
 	}
@@ -380,7 +385,7 @@ func (c *Config) versionFiles(source, base string, in []versionFileFile) ([]Vers
 			return nil, fmt.Errorf("%s: [[versionFile]] #%d is missing the required key \"path\"", source, i+1)
 		}
 		clean, ok := repoPath(path.Join(base, filepath.ToSlash(vf.Path)))
-		if !ok || filepath.IsAbs(vf.Path) {
+		if !ok || rooted(vf.Path) {
 			return nil, fmt.Errorf("%s: versionFile path %q must be a relative path inside the repository", source, vf.Path)
 		}
 		if seen[clean] {
@@ -450,7 +455,7 @@ func hooks(source, scope, base string, pre, post, paths []string) (Hooks, error)
 	}
 	for _, p := range paths {
 		clean, ok := repoPath(path.Join(base, filepath.ToSlash(p)))
-		if !ok || filepath.IsAbs(p) {
+		if !ok || rooted(p) {
 			return h, fmt.Errorf("%s: %spostBumpPaths entry %q must be a relative path inside the repository", source, scope, p)
 		}
 		if _, err := path.Match(clean, ""); err != nil {
@@ -587,10 +592,18 @@ func Find(root string) (string, error) {
 // repoPath cleans a configured path to slash form and reports whether it
 // stays inside the repository.
 func repoPath(p string) (string, bool) {
-	if filepath.IsAbs(p) || strings.HasPrefix(p, "-") || escapesRoot(p) {
+	if rooted(p) || strings.HasPrefix(p, "-") || escapesRoot(p) {
 		return "", false
 	}
 	return filepath.ToSlash(filepath.Clean(p)), true
+}
+
+// rooted reports whether p is anchored outside the repository on any OS:
+// absolute, root-relative ("/VERSION", which filepath.IsAbs accepts as
+// relative on Windows), or carrying a drive or UNC volume ("C:VERSION").
+func rooted(p string) bool {
+	return filepath.IsAbs(p) || strings.HasPrefix(p, "/") || strings.HasPrefix(p, `\`) ||
+		filepath.VolumeName(p) != "" || (len(p) >= 2 && p[1] == ':')
 }
 
 func escapesRoot(path string) bool {

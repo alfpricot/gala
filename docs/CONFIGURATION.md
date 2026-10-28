@@ -76,7 +76,7 @@ pattern = '__version__ = "([^"]+)"'
 | `[[versionFile]]` | none | app only (a monorepo package uses `[[package.versionFile]]`): more files that carry the release version; see [Extra version files](#extra-version-files) |
 | `preRelease` | `[]` | commands run after the preflights and before any write; see [Hook commands](#hook-commands) |
 | `postBump` | `[]` | commands run after the version writes and before staging |
-| `postBumpPaths` | `[]` | paths or `path.Match` patterns the `postBump` commands may change; needs `postBump` |
+| `postBumpPaths` | `[]` | files, directories (everything under them), or `path.Match` patterns the `postBump` commands may change; needs `postBump` |
 
 ## Extra version files
 
@@ -107,10 +107,10 @@ path = "VERSION"
 pattern = '^(\S+)'
 ```
 
-- `path` is relative to the repository root for `[[versionFile]]` and to the package directory for `[[package.versionFile]]`. Don't list the manager's own manifest, which gala already writes, and don't list one file under two packages.
+- `path` is relative to the repository root for `[[versionFile]]` and to the package directory for `[[package.versionFile]]`. Don't list a manifest that a manager already writes (the package's own or another package's), and don't list one file under two packages: a file can carry only one version.
 - Set exactly one of `key` and `pattern`.
 - `key` works for `.json` and `.toml` files. For JSON it's a dotted path through objects (`version`, `metadata.version`). For TOML it's the table followed by the key (`package.version`, `workspace.package.version`, `project.version`).
-- `pattern` is a [Go regular expression](https://pkg.go.dev/regexp/syntax) with exactly one capture group around the version. Every match must capture the same value, and gala rewrites all of them, so a file that states the version twice stays consistent. Use `(?m)` with `^` and `$` to anchor to a line, and make the pattern specific enough not to catch other values (a YAML `appVersion`, a dependency's version).
+- `pattern` is a [Go regular expression](https://pkg.go.dev/regexp/syntax) with exactly one capture group around the version. Every match must capture the same value, and gala rewrites all of them, so a file that states the version twice stays consistent. Use `(?m)` with `^` and `$` to anchor to a line; gala matches against the file with a byte-order mark removed and CRLF line endings read as LF, so the same pattern works on a Windows checkout. Make the pattern specific enough not to catch other values (a YAML `appVersion`, a dependency's version).
 - gala changes only the version's bytes: indentation, key order, comments, line endings, and a byte-order mark all stay as they were.
 - Each file must already record the package's current version. For `manager = "go"` and `manager = "none"`, which have no manifest version, the first version file stands in for the manifest: it supplies the starting version when there is no tag yet, and must agree with the latest tag when there is one. If any file disagrees, `plan` fails instead of tagging a release whose files publish another version.
 - When a version file is itself a manifest, gala refreshes its lockfile through the owning tool and adds the lockfile to the release commit:
@@ -149,7 +149,7 @@ Each command gets these environment variables:
 
 - `preRelease` runs during `release` and `--dry-run`, after every other preflight. These commands are checks: they must not change any tracked or unignored file, and the release stops if one does.
 - `postBump` runs during `release` only, after the manifests, version files, lockfiles, and changelog are written and before anything is staged. Use it to regenerate files that embed the version, such as generated source code. `--dry-run` lists the commands without running them.
-- Whatever a `postBump` command changes or creates must match the `postBumpPaths` of some scope that ran, and those changes join the release commit. A change anywhere else is an error, the same as any other unexpected change. A package's `postBumpPaths` are relative to its directory.
+- Whatever a `postBump` command changes or creates must match the `postBumpPaths` of some scope that ran (an exact file, a directory entry such as `dist` covering everything under it, or a pattern), and those changes join the release commit. A change anywhere else is an error, the same as any other unexpected change. A package's `postBumpPaths` are relative to its directory.
 - If a `postBump` command fails, gala prints its output and stops. Nothing has been committed, tagged, or pushed at that point; discard the local writes with `git restore` (and remove any new files the command created) and release again.
 
 ## Cargo workspaces
@@ -171,11 +171,13 @@ version.workspace = true
 
 The same holds for a monorepo package whose path is a workspace root. A monorepo package whose `Cargo.toml` inherits its version from a workspace root elsewhere is refused, because it can't be versioned on its own.
 
+A package whose version lives in `[workspace.package]` needs `publish = false`: `cargo publish` at a workspace root can't publish the members as one package, so the preflight refuses `publish = true` before anything is tagged. Publish the member crates from a workflow that reads the [workflow outputs](#workflow-outputs).
+
 A workspace member that isn't part of the release (it isn't a released manifest and isn't listed as a version file) is left alone: gala never bumps or tags it. To have it follow a package's version, list its `Cargo.toml` as a version file of that package with `key = "package.version"`. To version it independently, declare it as its own `[[package]]` in a monorepo config. Otherwise, bump it by hand in its own commit; `cargo update --workspace` in the next release records whatever version it carries.
 
 ## Python projects
 
-For `manager = "pypi"`, gala reads and writes `[project] version` in `pyproject.toml`, or `[tool.poetry] version` for a Poetry project that keeps its metadata there. A dynamic version (`dynamic = ["version"]`, a VCS or file-based version plugin) is refused at plan time; declare a static version and list any module that repeats it (`__init__.py`, `_version.py`) as a version file with a `pattern`. `uv.lock` is refreshed with `uv lock` when it exists; `poetry.lock` doesn't record the project's own version, so it needs no refresh.
+For `manager = "pypi"`, gala reads and writes `[project] version` in `pyproject.toml`, or `[tool.poetry] version` for a Poetry project that keeps its metadata there. A version with no static value (`dynamic = ["version"]` and no `[tool.poetry] version`), or one owned by an enabled `[tool.poetry-dynamic-versioning]` plugin, is refused at plan time; declare a static version and list any module that repeats it (`__init__.py`, `_version.py`) as a version file with a `pattern`. `uv.lock` is refreshed with `uv lock` when it exists; `poetry.lock` doesn't record the project's own version, so it needs no refresh.
 
 ## Other ecosystems
 

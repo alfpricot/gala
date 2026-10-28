@@ -125,7 +125,24 @@ func (c *cargoManager) RefreshLock(dir, root string) ([]string, error) {
 	return locks, nil
 }
 
-func (c *cargoManager) Preflight(string, bool) error { return nil }
+// Preflight refuses to publish a manifest whose version lives in
+// [workspace.package]: `cargo publish` there either rejects the virtual
+// manifest or publishes only the root crate, and either way the tag would
+// already be pushed. The members publish from a workflow instead.
+func (c *cargoManager) Preflight(dir string, publish bool) error {
+	if !publish {
+		return nil
+	}
+	content, file, err := c.read(dir)
+	if err != nil {
+		return err
+	}
+	if section, ok := versionSection(content); ok && section == "workspace.package" {
+		return fmt.Errorf("%s: the version comes from [workspace.package], and gala publishes one crate per "+
+			"package — set publish = false and publish the member crates from a workflow", file)
+	}
+	return nil
+}
 
 func (c *cargoManager) Publish(dir string) error {
 	_, err := c.r.Run(dir, "cargo", "publish")

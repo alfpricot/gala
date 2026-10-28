@@ -84,43 +84,80 @@ func Address(vf config.VersionFile) string {
 // a file that mentions the version twice (a constant and a docstring) cannot
 // drift.
 func patternValue(data []byte, pattern string) (string, error) {
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		return "", err
-	}
-	matches := re.FindAllSubmatchIndex(data, -1)
-	if len(matches) == 0 {
-		return "", fmt.Errorf("pattern %q matches nothing", pattern)
-	}
-	var value string
-	for i, m := range matches {
-		if m[2] < 0 {
-			return "", fmt.Errorf("pattern %q matched without its capture group", pattern)
-		}
-		got := string(data[m[2]:m[3]])
-		if i == 0 {
-			value = got
-		} else if got != value {
-			return "", fmt.Errorf("pattern %q matches disagree: %q and %q", pattern, value, got)
-		}
-	}
-	return value, nil
+	value, _, err := patternSpans(data, pattern)
+	return value, err
 }
 
 // replacePattern rewrites the capture group of every match.
 func replacePattern(data []byte, pattern, value string) ([]byte, error) {
-	if _, err := patternValue(data, pattern); err != nil {
+	_, spans, err := patternSpans(data, pattern)
+	if err != nil {
 		return nil, err
 	}
-	re := regexp.MustCompile(pattern)
 	var out []byte
 	last := 0
-	for _, m := range re.FindAllSubmatchIndex(data, -1) {
-		out = append(out, data[last:m[2]]...)
+	for _, s := range spans {
+		out = append(out, data[last:s[0]]...)
 		out = append(out, value...)
-		last = m[3]
+		last = s[1]
 	}
 	return append(out, data[last:]...), nil
+}
+
+// patternSpans matches pattern against a normalized view of data, with any
+// UTF-8 byte-order mark removed and CRLF folded to LF, so `^(\S+)` never
+// captures a BOM and `(?m)...$` works on Windows checkouts. It returns the
+// agreed capture value and each capture's byte range in the original data.
+func patternSpans(data []byte, pattern string) (string, [][2]int, error) {
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return "", nil, err
+	}
+	view, offsets := normalizeLines(data)
+	matches := re.FindAllSubmatchIndex(view, -1)
+	if len(matches) == 0 {
+		return "", nil, fmt.Errorf("pattern %q matches nothing", pattern)
+	}
+	var value string
+	spans := make([][2]int, 0, len(matches))
+	for i, m := range matches {
+		if m[2] < 0 {
+			return "", nil, fmt.Errorf("pattern %q matched without its capture group", pattern)
+		}
+		got := string(view[m[2]:m[3]])
+		if i == 0 {
+			value = got
+		} else if got != value {
+			return "", nil, fmt.Errorf("pattern %q matches disagree: %q and %q", pattern, value, got)
+		}
+		// The end comes from the last captured byte, not the byte after it,
+		// so a capture just before a dropped CR never swallows that CR.
+		end := offsets[m[2]]
+		if m[3] > m[2] {
+			end = offsets[m[3]-1] + 1
+		}
+		spans = append(spans, [2]int{offsets[m[2]], end})
+	}
+	return value, spans, nil
+}
+
+// normalizeLines drops a leading UTF-8 BOM and the CR of every CRLF. offsets
+// maps each index of the view (and one past its end) to the original data.
+func normalizeLines(data []byte) ([]byte, []int) {
+	start := 0
+	if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
+		start = 3
+	}
+	view := make([]byte, 0, len(data)-start)
+	offsets := make([]int, 0, len(data)-start+1)
+	for i := start; i < len(data); i++ {
+		if data[i] == '\r' && i+1 < len(data) && data[i+1] == '\n' {
+			continue
+		}
+		view = append(view, data[i])
+		offsets = append(offsets, i)
+	}
+	return view, append(offsets, len(data))
 }
 
 // LockCommand is one lockfile refresh a version file needs: run Name Args in

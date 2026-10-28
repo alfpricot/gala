@@ -184,14 +184,17 @@ func (e *Engine) Plan(now time.Time) (*Plan, error) {
 		}
 		// A manager with no manifest version (go, none) takes the package's
 		// first version file as its manifest, so adopting gala starts from the
-		// version the project already states instead of 0.0.0.
+		// version the project already states instead of 0.0.0. With a tag, the
+		// tag wins and checkVersionFiles reports a disagreeing file by name, so
+		// the manifest drift check below is for real manifests only.
+		adopted := false
 		if !ok && len(s.files) > 0 {
 			if mv, err = manager.ReadVersionFile(e.root, s.files[0]); err != nil {
 				return nil, fmt.Errorf("package %q: versionFile %w", s.name, err)
 			}
-			ok = true
+			ok, adopted = true, true
 		}
-		if anchors[i] != "" && ok && semver.Compare(mv, anchorVersions[i]) != 0 {
+		if anchors[i] != "" && ok && !adopted && semver.Compare(mv, anchorVersions[i]) != 0 {
 			return nil, e.driftError(s, anchors[i], mv)
 		}
 		switch {
@@ -203,8 +206,16 @@ func (e *Engine) Plan(now time.Time) (*Plan, error) {
 			bases[i] = semver.Version{} // go with no tag: 0.0.0
 		}
 	}
+	// A file holds one version, so a version file may not be any package's
+	// manifest: both writes would land on it and the last would win.
+	manifests := map[string]string{}
+	for _, s := range specs {
+		if m := s.mgr.Manifest(s.absDir, e.root); m != "" {
+			manifests[m] = s.name
+		}
+	}
 	for i, s := range specs {
-		if err := e.checkVersionFiles(s, bases[i]); err != nil {
+		if err := e.checkVersionFiles(s, bases[i], manifests); err != nil {
 			return nil, err
 		}
 	}

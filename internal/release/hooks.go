@@ -14,20 +14,25 @@ import (
 // checkVersionFiles is the plan-time agreement check: every version file of a
 // package must already record the version its manifest (or, for go, its tag)
 // does, or the release would tag one version and publish metadata saying
-// another.
-func (e *Engine) checkVersionFiles(s spec, current semver.Version) error {
+// another. manifests maps every package's manifest path to its package name.
+func (e *Engine) checkVersionFiles(s spec, current semver.Version, manifests map[string]string) error {
 	manifest := s.mgr.Manifest(s.absDir, e.root)
 	for _, vf := range s.files {
 		if vf.Path == manifest {
 			return fmt.Errorf("%s: versionFile %q is the %s manifest, which gala already writes — remove it",
 				e.cfg.Source, vf.Path, s.mgr.Name())
 		}
+		if owner, ok := manifests[vf.Path]; ok {
+			return fmt.Errorf("%s: package %q lists versionFile %q, which is the manifest of package %q — "+
+				"a file can carry only one version, so remove it from one of them",
+				e.cfg.Source, s.name, vf.Path, owner)
+		}
 		v, err := manager.ReadVersionFile(e.root, vf)
 		if err != nil {
 			return fmt.Errorf("package %q: versionFile %w", s.name, err)
 		}
 		if semver.Compare(v, current) != 0 {
-			source := "the latest tag"
+			source := "the package's current version"
 			if manifest != "" {
 				source = manifest
 			}

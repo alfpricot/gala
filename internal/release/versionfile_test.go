@@ -558,3 +558,135 @@ pattern = '(?m)^version: (\S+)$'
 		t.Errorf("manager none with publish = true must fail the preflight: %v", err)
 	}
 }
+
+// scaffold commits files on main with a bare origin and returns the repo.
+func scaffold(t *testing.T, files map[string]string) (*gittest.Repo, func()) {
+	t.Helper()
+	r, cleanup, err := gittest.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, content := range files {
+		if err := r.WriteFile(path, content); err != nil {
+			cleanup()
+			t.Fatal(err)
+		}
+	}
+	if err := r.CommitAll("chore: scaffold"); err != nil {
+		cleanup()
+		t.Fatal(err)
+	}
+	_, bareCleanup, err := r.BareRemote("origin", "main")
+	if err != nil {
+		cleanup()
+		t.Fatal(err)
+	}
+	return r, func() {
+		bareCleanup()
+		cleanup()
+	}
+}
+
+func TestVersionFileThatIsAnotherPackagesManifestFails(t *testing.T) {
+	cfg := "kind = \"monorepo\"\nmanager = \"cargo\"\ngithubRelease = false\n\n" +
+		"[[package]]\npath = \"core\"\n\n[[package.versionFile]]\npath = \"../node/package.json\"\nkey = \"version\"\n\n" +
+		"[[package]]\npath = \"node\"\nmanager = \"npm\"\n"
+	r, cleanup := scaffold(t, map[string]string{
+		"gala.toml":         cfg,
+		"core/Cargo.toml":   "[package]\nname = \"core\"\nversion = \"1.0.0\"\n",
+		"node/package.json": "{\n  \"name\": \"node\",\n  \"version\": \"1.0.0\"\n}\n",
+	})
+	defer cleanup()
+
+	opts, _, _ := testOptions(r, &captureRunner{})
+	err := Run(opts, ModePlan)
+	if err == nil {
+		t.Fatal("a version file that is another package's manifest must fail the plan")
+	}
+	mustContain(t, err.Error(), "is the manifest of package \"node\"", "the overlap error")
+}
+
+func TestAdoptedVersionFileMismatchNamesTheFile(t *testing.T) {
+	cfg := "kind = \"app\"\nmanager = \"none\"\ngithubRelease = false\n\n" +
+		"[[versionFile]]\npath = \"VERSION\"\npattern = '^(\\S+)'\n"
+	r, cleanup := scaffold(t, map[string]string{"gala.toml": cfg, "VERSION": "1.1.0\n"})
+	defer cleanup()
+	if err := r.Tag("v1.2.0"); err != nil {
+		t.Fatal(err)
+	}
+
+	opts, _, _ := testOptions(r, &captureRunner{})
+	err := Run(opts, ModePlan)
+	if err == nil {
+		t.Fatal("a version file behind the latest tag must fail the plan")
+	}
+	mustContain(t, err.Error(), "versionFile VERSION records 1.1.0", "the version-file error")
+	mustContain(t, err.Error(), "set it to 1.2.0", "the fix")
+	mustNotContain(t, err.Error(), "manifest version", "the manifest drift wording")
+}
+
+func TestNothingDueWarnsOnUnwritableGitHubOutput(t *testing.T) {
+	cfg := "kind = \"app\"\nmanager = \"none\"\ngithubRelease = false\n\n" +
+		"[[versionFile]]\npath = \"VERSION\"\npattern = '^(\\S+)'\n"
+	r, cleanup := scaffold(t, map[string]string{"gala.toml": cfg, "VERSION": "1.0.0\n"})
+	defer cleanup()
+	if err := r.Tag("v1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+
+	opts, _, warn := testOptions(r, &captureRunner{})
+	opts.GitHubOutput = filepath.Join(t.TempDir(), "missing", "dir", "output")
+	if err := Run(opts, ModeRelease); err != nil {
+		t.Fatalf("nothing to release must stay exit 0: %v", err)
+	}
+	mustContain(t, warn.String(), "GITHUB_OUTPUT", "the warning")
+}
+
+// TestVersionFileRootLockRefreshedBesideNestedProject covers a root uv.lock
+// that belongs to a different project from a package's own uv.lock: the
+// package's `uv lock` rewrites only its own lock, so the root version file's
+// lock still gets its own refresh.
+func TestVersionFileRootLockRefreshedBesideNestedProject(t *testing.T) {
+	cfg := "kind = \"monorepo\"\nmanager = \"pypi\"\ngithubRelease = false\n\n" +
+		"[[package]]\npath = \"packages/a\"\n\n" +
+		"[[package]]\npath = \"tools\"\nname = \"tools\"\nmanager = \"none\"\n\n" +
+		"[[package.versionFile]]\npath = \"../pyproject.toml\"\nkey = \"project.version\"\n"
+	r, cleanup := scaffold(t, map[string]string{
+		"gala.toml":                 cfg,
+		"pyproject.toml":            "[project]\nname = \"root\"\nversion = \"3.0.0\"\n",
+		"uv.lock":                   "version = 1\n",
+		"packages/a/pyproject.toml": "[project]\nname = \"a\"\nversion = \"1.0.0\"\n",
+		"packages/a/uv.lock":        "version = 1\n",
+		"tools/README.md":           "tools\n",
+	})
+	defer cleanup()
+	for path, msg := range map[string]string{
+		"packages/a/x.py": "feat: a",
+		"tools/run.sh":    "feat: tools",
+	} {
+		if err := r.CommitFile(path, "x\n", msg); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	exec := &captureRunner{}
+	opts, out, _ := testOptions(r, exec)
+	if err := Run(opts, ModeRelease); err != nil {
+		t.Fatalf("release failed: %v\n%s", err, out.String())
+	}
+	top, err := r.Run("rev-parse", "--show-toplevel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.FromSlash(strings.TrimSpace(top))
+	var uvDirs []string
+	for _, c := range exec.calls {
+		if c.name == "uv" && len(c.args) > 0 && c.args[0] == "lock" {
+			rel, _ := filepath.Rel(root, c.dir)
+			uvDirs = append(uvDirs, filepath.ToSlash(rel))
+		}
+	}
+	if strings.Join(uvDirs, ",") != "packages/a,." {
+		t.Errorf("uv lock ran in %v, want packages/a then the root", uvDirs)
+	}
+}

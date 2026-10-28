@@ -40,6 +40,14 @@ func (p *pypiManager) ManifestVersion(dir string) (semver.Version, bool, error) 
 	if err != nil {
 		return semver.Version{}, false, err
 	}
+	// The poetry-dynamic-versioning plugin keeps a placeholder in
+	// [tool.poetry] version and stamps the real one at build time, so the
+	// static value is not the project's version.
+	if enabled, ok := GetTomlString(content, "tool.poetry-dynamic-versioning", "enable"); ok && enabled == "true" {
+		return semver.Version{}, false, fmt.Errorf(
+			"%s: [tool.poetry-dynamic-versioning] is enabled, so [tool.poetry] version is a placeholder — "+
+				"dynamic versioning is not supported; disable the plugin and keep a static version", file)
+	}
 	section, ok := pyprojectSection(content, "version")
 	if !ok {
 		return semver.Version{}, false, fmt.Errorf(

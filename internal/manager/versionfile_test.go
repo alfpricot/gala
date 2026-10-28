@@ -253,3 +253,66 @@ func TestCargoWorkspacePackageVersion(t *testing.T) {
 		t.Errorf("a virtual workspace without a shared version must say where gala looked: %v", err)
 	}
 }
+
+// TestPatternVersionFileBOMAndCRLF covers files written on Windows: a
+// byte-order mark is never captured, `(?m)...$` anchors match before CRLF,
+// and a write changes only the version's bytes.
+func TestPatternVersionFileBOMAndCRLF(t *testing.T) {
+	cases := []struct {
+		name, content, pattern string
+	}{
+		{"BOM", "\xef\xbb\xbf1.4.0\r\n", `^(\S+)`},
+		{"CRLF anchored", "apiVersion: v2\r\nversion: 1.4.0\r\nappVersion: \"3.1\"\r\n", `(?m)^version: (\S+)$`},
+		{"BOM and CRLF", "\xef\xbb\xbfversion=1.4.0\r\nname=x\r\n", `(?m)^version=(\S+)$`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := tempWith(t, "VERSION", tc.content)
+			vf := config.VersionFile{Path: "VERSION", Pattern: tc.pattern}
+			if v, err := ReadVersionFile(root, vf); err != nil || v.String() != "1.4.0" {
+				t.Fatalf("read = %v, %v", v, err)
+			}
+			if err := WriteVersionFile(root, vf, semver.Version{Major: 1, Minor: 5}); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(filepath.Join(root, "VERSION"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := strings.Replace(tc.content, "1.4.0", "1.5.0", 1); string(data) != want {
+				t.Errorf("write changed more than the version:\n%q\nwant\n%q", data, want)
+			}
+		})
+	}
+}
+
+func TestPypiDynamicVersioningPluginRefused(t *testing.T) {
+	content := "[project]\nname = \"widget\"\ndynamic = [\"version\"]\n\n[tool.poetry]\nversion = \"0.0.0\"\n\n" +
+		"[tool.poetry-dynamic-versioning]\nenable = true\n"
+	root := tempWith(t, "pyproject.toml", content)
+	p, _ := New("pypi", &captureRunner{})
+	if _, _, err := p.ManifestVersion(root); err == nil || !strings.Contains(err.Error(), "poetry-dynamic-versioning") {
+		t.Errorf("an enabled dynamic-versioning plugin must be refused: %v", err)
+	}
+
+	// Poetry 2's own pattern keeps a real static version beside dynamic = ["version"].
+	static := tempWith(t, "pyproject.toml", "[project]\nname = \"widget\"\ndynamic = [\"version\"]\n\n[tool.poetry]\nversion = \"2.0.0\"\n")
+	if v, ok, err := p.ManifestVersion(static); err != nil || !ok || v.String() != "2.0.0" {
+		t.Errorf("static [tool.poetry] version = %v, %v, %v", v, ok, err)
+	}
+}
+
+func TestCargoPreflightRefusesWorkspacePublish(t *testing.T) {
+	c, _ := New("cargo", &captureRunner{})
+	virtual := tempWith(t, "Cargo.toml", "[workspace]\nmembers = [\"a\"]\n\n[workspace.package]\nversion = \"1.0.0\"\n")
+	if err := c.Preflight(virtual, true); err == nil || !strings.Contains(err.Error(), "[workspace.package]") {
+		t.Errorf("publishing a workspace-version root must fail before the tag: %v", err)
+	}
+	if err := c.Preflight(virtual, false); err != nil {
+		t.Errorf("publish = false needs no publish check: %v", err)
+	}
+	crate := tempWith(t, "Cargo.toml", "[package]\nname = \"x\"\nversion = \"1.0.0\"\n")
+	if err := c.Preflight(crate, true); err != nil {
+		t.Errorf("a plain crate publishes: %v", err)
+	}
+}

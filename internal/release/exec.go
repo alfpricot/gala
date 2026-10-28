@@ -42,6 +42,9 @@ func (e *Engine) execute(plan *Plan, publish bool) error {
 	// those writes, so a version file sharing the lockfile does not run the
 	// tool again. npm is left out: for a single package it reports the lock
 	// that `npm version` kept in step without running anything afterwards.
+	// Only the nearest lock counts (cargo and uv report the package's own lock
+	// before the root's): the tool runs in the package directory and rewrites
+	// that one, so a root lock of a separate project is still refreshed below.
 	refreshed := map[string]bool{}
 	for _, pkg := range due {
 		locks, err := pkg.Manager.RefreshLock(pkg.AbsDir, e.root)
@@ -49,10 +52,8 @@ func (e *Engine) execute(plan *Plan, publish bool) error {
 			return fmt.Errorf("package %q: %w", pkg.Name, err)
 		}
 		lockfiles = append(lockfiles, locks...)
-		if pkg.Manager.Name() != string(config.ManagerNpm) {
-			for _, l := range locks {
-				refreshed[l] = true
-			}
+		if pkg.Manager.Name() != string(config.ManagerNpm) && len(locks) > 0 {
+			refreshed[locks[0]] = true
 		}
 		if m := pkg.Manager.Manifest(pkg.AbsDir, e.root); m != "" {
 			manifests = append(manifests, m)

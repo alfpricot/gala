@@ -47,6 +47,7 @@ key = "package.version"
 		"b/src/meta.json":     true,
 		"src/main.c":          false,
 		"b/src/nested/x.json": false,
+		"src/version.c/x":     true, // an entry also covers files under it
 	} {
 		if got := cfg.MatchesPostBumpPath(p); got != want {
 			t.Errorf("MatchesPostBumpPath(%q) = %v, want %v", p, got, want)
@@ -84,6 +85,9 @@ func TestVersionFileAndHookErrors(t *testing.T) {
 		{"paths without hook", app + "postBumpPaths = [\"src/version.c\"]\n", "needs a postBump command"},
 		{"escaping hook path", app + "postBump = [\"make\"]\npostBumpPaths = [\"../x\"]\n", "inside the repository"},
 		{"bad pattern", app + "postBump = [\"make\"]\npostBumpPaths = [\"src/[\"]\n", "not a valid pattern"},
+		{"root-relative versionFile", app + "\n[[versionFile]]\npath = \"/VERSION\"\npattern = \"(.*)\"\n", "inside the repository"},
+		{"drive versionFile", app + "\n[[versionFile]]\npath = \"C:VERSION\"\npattern = \"(.*)\"\n", "inside the repository"},
+		{"root-relative postBumpPaths", app + "postBump = [\"make\"]\npostBumpPaths = [\"/dist/*\"]\n", "inside the repository"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

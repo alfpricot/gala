@@ -32,8 +32,12 @@ func Run(opts *Options, mode Mode) error {
 		if mode != ModePlan {
 			_, _ = io.WriteString(opts.out(), "\nrelease: nothing to do — no tags, no commits, no writes.\n")
 		}
+		// Nothing to release stays exit 0: an unwritable GITHUB_OUTPUT only
+		// warns here, the same as after a real release.
 		if mode == ModeRelease {
-			return e.writeGitHubOutput(nil)
+			if err := e.writeGitHubOutput(nil); err != nil {
+				opts.warnf("%v", err)
+			}
 		}
 		return nil
 	}
