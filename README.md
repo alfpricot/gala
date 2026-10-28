@@ -24,7 +24,9 @@ go install github.com/alfpricot/gala/cmd/gala@latest
 
 Every release is also published to GitHub Packages as the npm package `@alfpricot/gala`, so a Node project can use gala without a Go toolchain. The same install works on Linux, macOS, and Windows, on x64 and arm64: the prebuilt binary for each platform is its own `@alfpricot/gala-<os>-<arch>` package, listed as an optional dependency, and npm installs only the one matching the machine. Installing with `--omit=optional` leaves the binary out.
 
-GitHub Packages needs authentication even for a public package: point the scope at the registry and supply a token with `read:packages`. In CI that is a workflow's `GITHUB_TOKEN` with `packages: read`, once the packages grant that repository access; the grant is per package, so it covers the wrapper and each platform package the runners use:
+GitHub Packages needs authentication even for a public package: point the scope at the registry and supply a token with `read:packages` in `NODE_AUTH_TOKEN`, which the snippet below reads. Locally that is a personal access token. In CI it is the workflow's `GITHUB_TOKEN` with `packages: read`, set on the install step as `env: NODE_AUTH_TOKEN: ${{ github.token }}`.
+
+Access is granted per package, so give the consumer repository read access on the wrapper and on each platform package its runners use. A platform package the token cannot read is skipped like any optional dependency: the install still passes, and `gala` then reports the missing binary when it runs.
 
 ```ini
 # .npmrc

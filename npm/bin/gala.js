@@ -55,6 +55,11 @@ function main() {
     console.error(`gala: failed to run the native binary: ${result.error.message}`);
     process.exit(1);
   }
+  // A signal death has no status; re-raise the signal so the caller sees the
+  // same termination the binary had, falling back to 1 if Node survives it.
+  if (result.signal) {
+    process.kill(process.pid, result.signal);
+  }
   process.exit(result.status ?? 1);
 }
 

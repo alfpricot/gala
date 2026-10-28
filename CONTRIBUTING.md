@@ -14,7 +14,7 @@ go build ./...
 just run plan
 ```
 
-You need Go 1.27.3 or newer (see `go.mod`), `git`, and [`just`](https://github.com/casey/just). Dev tools (staticcheck, errcheck, govulncheck) are pinned in `go.mod` and run through `go tool`.
+You need Go 1.27.3 or newer (see `go.mod`), `git`, [`just`](https://github.com/casey/just), and Node 18 or newer (for the npm package checks). Dev tools (staticcheck, errcheck, govulncheck) are pinned in `go.mod` and run through `go tool`.
 
 ## Validation before a pull request
 
@@ -24,7 +24,7 @@ just check
 
 If it stops at the formatting check, `just fmt` rewrites every Go file in place. `just build` writes the binary to `./bin/gala`.
 
-`just check` runs gofmt, `go vet`, `go mod tidy -diff`, staticcheck, errcheck, govulncheck, `go test -race`, a build, and a self-plan. It matches the steps in `.github/workflows/verify.yml`, which runs on every pull request.
+`just check` runs gofmt, `go vet`, `go mod tidy -diff`, staticcheck, errcheck, govulncheck, `go test -race`, a build, a self-plan, and the npm package manifest checks (`node --test` in `npm/`). It matches the steps in `.github/workflows/verify.yml`, which runs on every pull request.
 
 ## Pull requests
 

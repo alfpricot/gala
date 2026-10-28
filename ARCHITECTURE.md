@@ -73,7 +73,7 @@ The main path: `cmd/gala` → `release.Run` → read git history and tags → pl
 
 ## Build, test, release, and deploy
 
-- **`verify.yml`** runs on pull requests and manual dispatch. It checks formatting, `go vet`, `go mod tidy -diff`, staticcheck, errcheck, govulncheck, `go test -race`, and a build, then runs `gala plan` on its own repository.
+- **`verify.yml`** runs on pull requests and manual dispatch. It checks formatting, `go vet`, `go mod tidy -diff`, staticcheck, errcheck, govulncheck, `go test -race`, and a build, then runs `gala plan` on its own repository and checks that the npm package manifests agree with `npm/platforms.json`.
 - **`release.yml`** runs on pushes to `main` and manual dispatch, and runs `gala release`, pushing over the `RELEASE_DEPLOY_KEY` deploy key (the ruleset bypass) and creating the GitHub Release with `GITHUB_TOKEN`. gala releases itself: changelog, tag, push, `dev` fast-forward, and GitHub Release, with no registry step in gala itself (`publish = false` in `.gala.toml`). After a run that tagged a release, the workflow publishes the npm packages from `npm/` to GitHub Packages: one `@alfpricot/gala-<os>-<arch>` package per platform in `npm/platforms.json`, then the `@alfpricot/gala` wrapper that lists them as `optionalDependencies`.
 - `just check` runs the same gate locally.
 
