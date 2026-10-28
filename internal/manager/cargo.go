@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/alfpricot/gala/internal/semver"
 )
@@ -38,14 +40,16 @@ func (c *cargoManager) ManifestVersion(dir string) (semver.Version, bool, error)
 	if err != nil {
 		return semver.Version{}, false, err
 	}
-	if v, ok := GetTomlString(content, "package", "version"); ok {
+	if v, ok := GetTomlString(content, "package", "version"); ok && !strings.HasPrefix(v, "{") {
 		parsed, err := semver.Parse(v)
 		if err != nil {
 			return semver.Version{}, false, fmt.Errorf("%s: [package] version: %w", file, err)
 		}
 		return parsed, true, nil
 	}
-	if SectionHasKey(content, "package", "version.workspace") {
+	// Both spellings inherit: version.workspace = true and the inline table
+	// version = { workspace = true }.
+	if SectionHasKey(content, "package", "version.workspace") || inheritsVersion(content) {
 		return semver.Version{}, false, fmt.Errorf(
 			"%s: [package] sets version.workspace = true; gala releases packages independently, "+
 				"so the manifest needs an explicit version", file)
@@ -107,4 +111,22 @@ func (c *cargoManager) Publish(dir string) error {
 
 func (c *cargoManager) Recovery(dir, root string) string {
 	return fmt.Sprintf("cd %s && cargo publish", rel(dir, root))
+}
+
+// inlineWorkspaceRe matches `version = { workspace = true }` in any spacing.
+var inlineWorkspaceRe = regexp.MustCompile(`^[ \t]*version[ \t]*=[ \t]*\{[^}]*\bworkspace[ \t]*=[ \t]*true\b`)
+
+// inheritsVersion reports whether [package] inherits its version through the
+// inline-table spelling.
+func inheritsVersion(content string) bool {
+	lines, err := SectionLines(content, "package")
+	if err != nil {
+		return false
+	}
+	for _, l := range lines[1:] {
+		if inlineWorkspaceRe.MatchString(l) {
+			return true
+		}
+	}
+	return false
 }

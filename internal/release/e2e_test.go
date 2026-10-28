@@ -196,7 +196,7 @@ func TestSyncRejectionWarnsWithoutFailing(t *testing.T) {
 	mustContain(t, out.String(), "sync    main → dev", "the transcript shows the sync step")
 }
 
-// TestMonorepoRelease covers P4: declared packages, path-scoped planning, per
+// TestMonorepoRelease covers the monorepo driver: declared packages, path-scoped planning, per
 // package tags, one release commit, and publishes in declaration order.
 func TestMonorepoRelease(t *testing.T) {
 	cfg := `kind = "monorepo"
@@ -346,3 +346,130 @@ path = "packages/cli"
 }
 
 func filepathSlash(p string) string { return strings.ReplaceAll(p, "\\", "/") }
+
+// TestReleasePerManager checks that `gala release` completes on an
+// app fixture for every registry manager, real git underneath and the
+// argv-capture runner standing in for the lock and publish commands.
+func TestReleasePerManager(t *testing.T) {
+	cases := []struct {
+		manager  string
+		files    map[string]string
+		manifest string // repo-relative file whose version the adapter writes by hand; "" when npm owns it
+		want     [][]string
+	}{
+		{
+			manager: "npm",
+			files:   map[string]string{"package.json": "{\n  \"name\": \"widget\",\n  \"version\": \"1.0.0\"\n}\n"},
+			want: [][]string{
+				{"npm", "whoami"},
+				{"npm", "version", "1.1.0", "--no-git-tag-version"},
+				{"npm", "publish"},
+			},
+		},
+		{
+			manager: "cargo",
+			files: map[string]string{
+				"Cargo.toml": "[package]\nname = \"widget\"\nversion = \"1.0.0\" # bumped by gala\n",
+				"Cargo.lock": "version = 4\n",
+			},
+			manifest: "Cargo.toml",
+			want: [][]string{
+				{"cargo", "update", "--workspace"},
+				{"cargo", "publish"},
+			},
+		},
+		{
+			manager: "pypi",
+			files: map[string]string{
+				"pyproject.toml": "[project]\nname = \"widget\"\nversion = \"1.0.0\"\n",
+				"uv.lock":        "version = 1\n",
+			},
+			manifest: "pyproject.toml",
+			want: [][]string{
+				{"uv", "lock"},
+				{"uv", "build"},
+				{"uv", "publish"},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.manager, func(t *testing.T) {
+			cfg := "kind = \"app\"\nmanager = \"" + tc.manager + "\"\npublish = true\ngithubRelease = false\n"
+			r, cleanup, err := gittest.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer cleanup()
+			if err := r.WriteFile("gala.toml", cfg); err != nil {
+				t.Fatal(err)
+			}
+			for path, content := range tc.files {
+				if err := r.WriteFile(path, content); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := r.CommitAll("chore: scaffold"); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.Tag("v1.0.0"); err != nil {
+				t.Fatal(err)
+			}
+			bare, bareCleanup, err := r.BareRemote("origin", "main")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer bareCleanup()
+			if err := r.CommitFile("src.txt", "x\n", "feat: a widget"); err != nil {
+				t.Fatal(err)
+			}
+
+			exec := &captureRunner{}
+			opts, out, warn := testOptions(r, exec)
+			if err := Run(opts, ModeRelease); err != nil {
+				t.Fatalf("release failed: %v\n%s", err, out.String())
+			}
+
+			var got [][]string
+			for _, c := range exec.calls {
+				got = append(got, append([]string{c.name}, c.args...))
+			}
+			if strings.Join(flatten(got), " | ") != strings.Join(flatten(tc.want), " | ") {
+				t.Errorf("argv = %v, want %v", got, tc.want)
+			}
+
+			if tc.manifest != "" {
+				m, err := r.ReadFile(tc.manifest)
+				if err != nil {
+					t.Fatal(err)
+				}
+				mustContain(t, m, `version = "1.1.0"`, tc.manifest+" is bumped by the text edit")
+			}
+			if !strings.Contains(tags(t, r), "v1.1.0") {
+				t.Errorf("missing tag v1.1.0 (tags: %q)", tags(t, r))
+			}
+			head, err := r.HeadSHA()
+			if err != nil {
+				t.Fatal(err)
+			}
+			remoteMain, err := gittest.RemoteRef(bare, "main")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if remoteMain != head {
+				t.Errorf("bare main = %s, want the release commit %s", remoteMain, head)
+			}
+			if warn.String() != "" {
+				t.Errorf("unexpected warnings: %s", warn.String())
+			}
+		})
+	}
+}
+
+func flatten(argvs [][]string) []string {
+	out := make([]string, 0, len(argvs))
+	for _, a := range argvs {
+		out = append(out, strings.Join(a, " "))
+	}
+	return out
+}

@@ -380,3 +380,56 @@ func TestConfigPathOverride(t *testing.T) {
 		t.Fatalf("--config must override discovery: %v", err)
 	}
 }
+
+// TestMonorepoUnionRangeCoversEveryAnchor: with three or more tagged packages
+// the batched log's union range must start at a common ancestor of every
+// anchor. Here c's tag is older than a's and b's, so a range anchored on the
+// newer tags would drop c's feature and leave c wrongly "not due".
+func TestMonorepoUnionRangeCoversEveryAnchor(t *testing.T) {
+	r, cleanup, err := gittest.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	cfg := "kind = \"monorepo\"\nmanager = \"cargo\"\n\n" +
+		"[[package]]\npath = \"packages/a\"\n\n" +
+		"[[package]]\npath = \"packages/b\"\n\n" +
+		"[[package]]\npath = \"packages/c\"\n"
+	if err := r.WriteFile("gala.toml", cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a", "b", "c"} {
+		manifest := "[package]\nname = \"" + name + "\"\nversion = \"1.0.0\"\n"
+		if err := r.WriteFile("packages/"+name+"/Cargo.toml", manifest); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.CommitAll("chore: declare the packages"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Tag("c/v1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CommitFile("packages/c/src/lib.rs", "pub fn c() {}\n", "feat: c widget"); err != nil {
+		t.Fatal(err)
+	}
+	for _, tag := range []string{"a/v1.0.0", "b/v1.0.0"} {
+		if err := r.Tag(tag); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.CommitFile("packages/a/src/lib.rs", "pub fn a() {}\n", "fix: a bug"); err != nil {
+		t.Fatal(err)
+	}
+
+	opts, out, _ := testOptions(r, &captureRunner{})
+	if err := Run(opts, ModePlan); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	mustContain(t, got, "a → a/v1.0.1", "a plans its fix")
+	mustContain(t, got, "b → no release", "b has no commits")
+	mustContain(t, got, "c → c/v1.1.0", "c's feature since its older tag is in range")
+	mustContain(t, got, "2 of 3 packages due", "the header counts due packages")
+}

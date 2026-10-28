@@ -384,8 +384,8 @@ func (e *Engine) driftError(s spec, tag string, mv semver.Version) error {
 	msg := fmt.Sprintf("package %q: manifest version %s does not match the latest reachable tag %s — "+
 		"reconcile by hand, gala never guesses around drift", s.name, mv, tag)
 	if e.cfg.SyncBranch != "" {
-		msg += fmt.Sprintf(" (without syncBranch this branch never receives the release commit; "+
-			"the likely fix is the sync: git fetch %s && git merge %s/%s)",
+		msg += fmt.Sprintf(" (this branch is likely missing the release commit the syncBranch push delivers; "+
+			"bring it up to date: git fetch %s && git merge %s/%s)",
 			e.cfg.Remote, e.cfg.Remote, e.cfg.SyncBranch)
 	} else if len(e.cfg.ReleaseBranches) > 0 {
 		msg += fmt.Sprintf(" (set syncBranch, or plan on %s where the release commit lands)",

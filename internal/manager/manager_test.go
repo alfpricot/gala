@@ -258,15 +258,17 @@ func TestCargoSetVersionPreservesBytes(t *testing.T) {
 }
 
 func TestCargoVersionWorkspaceRefused(t *testing.T) {
-	root := tempWith(t, "workspace/Cargo.toml", "[package]\nname = \"scarf\"\nversion.workspace = true\n")
-	dir := filepath.Join(root, "workspace")
-	c, _ := New("cargo", &captureRunner{})
-	_, _, err := c.ManifestVersion(dir)
-	if err == nil {
-		t.Fatal("version.workspace = true must be refused before any write")
-	}
-	if !strings.Contains(err.Error(), "version.workspace") || !strings.Contains(err.Error(), "Cargo.toml") {
-		t.Errorf("error must name the file and the key: %v", err)
+	for _, line := range []string{"version.workspace = true", "version = { workspace = true }"} {
+		root := tempWith(t, "workspace/Cargo.toml", "[package]\nname = \"scarf\"\n"+line+"\n")
+		dir := filepath.Join(root, "workspace")
+		c, _ := New("cargo", &captureRunner{})
+		_, _, err := c.ManifestVersion(dir)
+		if err == nil {
+			t.Fatalf("%s must be refused before any write", line)
+		}
+		if !strings.Contains(err.Error(), "version.workspace") || !strings.Contains(err.Error(), "Cargo.toml") {
+			t.Errorf("%s: error must name the file and the key: %v", line, err)
+		}
 	}
 }
 

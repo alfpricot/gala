@@ -3,7 +3,7 @@
 # A promotion that lands on main cuts the release: plan, write the changelog,
 # bump, commit (skip-ci marker in the body), annotate, push atomically,
 # fast-forward dev, and create the GitHub Release. publish = false in
-# gala.toml, so there is no registry step.
+# .gala.toml, so there is no registry step.
 #
 # Pushes made with GITHUB_TOKEN do not trigger further workflow runs, so the
 # release commit and the dev sync cannot loop back into this workflow.
