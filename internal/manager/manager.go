@@ -75,7 +75,9 @@ type Manager interface {
 	RefreshLock(dir, root string) (lockfiles []string, err error)
 
 	// Preflight runs live checks before anything is written. npm verifies the
-	// registry login when publishing is on; the rest have nothing to check.
+	// registry login when publishing is on; nuget checks the version MSBuild
+	// evaluates on every run, and packability and the push source when
+	// publishing is on; the rest have nothing to check.
 	Preflight(dir string, publish bool) error
 
 	// Publish pushes the package to the registry.
@@ -97,6 +99,8 @@ func New(name config.ManagerName, r Runner) (Manager, error) {
 		return &cargoManager{r: r}, nil
 	case config.ManagerPyPI:
 		return &pypiManager{r: r}, nil
+	case config.ManagerNuGet:
+		return &nugetManager{r: r}, nil
 	default:
 		return nil, fmt.Errorf("unknown manager %q", name)
 	}

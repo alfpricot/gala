@@ -59,10 +59,15 @@ type call struct {
 // never runs. Real git still runs underneath.
 type captureRunner struct {
 	calls []call
+	// respond, when set, answers every call in place of the defaults.
+	respond func(dir, name string, args []string) (string, error)
 }
 
 func (c *captureRunner) Run(dir, name string, args ...string) (string, error) {
 	c.calls = append(c.calls, call{dir: dir, name: name, args: append([]string(nil), args...)})
+	if c.respond != nil {
+		return c.respond(dir, name, args)
+	}
 	if len(args) > 0 && args[0] == "whoami" {
 		return "fixture-user\n", nil
 	}

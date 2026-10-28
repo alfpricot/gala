@@ -1,6 +1,9 @@
 package release
 
 import (
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -472,4 +475,90 @@ func flatten(argvs [][]string) []string {
 		out = append(out, strings.Join(a, " "))
 	}
 	return out
+}
+
+// TestReleaseNuget runs a nuget release end to end: MSBuild is asked for the
+// version before and after the write, the push source is checked before the
+// write, the project file is bumped in place and committed, and the package is
+// packed and pushed after the tag.
+func TestReleaseNuget(t *testing.T) {
+	cfg := "kind = \"app\"\nmanager = \"nuget\"\npublish = true\ngithubRelease = false\n"
+	r, cleanup, err := gittest.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	proj := "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <PackageId>Martin.Widget</PackageId>\n" +
+		"    <Version>1.0.0</Version>\n  </PropertyGroup>\n</Project>\n"
+	if err := r.WriteFile("gala.toml", cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.WriteFile("Widget.csproj", proj); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CommitAll("chore: scaffold"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Tag("v1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	_, bareCleanup, err := r.BareRemote("origin", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bareCleanup()
+	if err := r.CommitFile("Widget.cs", "namespace Widget;\n", "feat: a widget"); err != nil {
+		t.Fatal(err)
+	}
+
+	versionRe := regexp.MustCompile(`<Version>([^<]*)</Version>`)
+	exec := &captureRunner{respond: func(dir, _ string, args []string) (string, error) {
+		switch args[0] {
+		case "msbuild":
+			data, err := os.ReadFile(args[1])
+			if err != nil {
+				return "", err
+			}
+			v := versionRe.FindStringSubmatch(string(data))[1]
+			return `{"Properties": {"PackageVersion": "` + v + `", "IsPackable": ""}}` + "\n", nil
+		case "pack":
+			out := args[len(args)-1]
+			return "", os.WriteFile(filepath.Join(out, "Martin.Widget.1.1.0.nupkg"), nil, 0o644)
+		}
+		return "", nil
+	}}
+	opts, out, warn := testOptions(r, exec)
+	if err := Run(opts, ModeRelease); err != nil {
+		t.Fatalf("release failed: %v\n%s", err, out.String())
+	}
+
+	var got []string
+	for _, c := range exec.calls {
+		got = append(got, c.name+" "+c.args[0])
+	}
+	want := []string{"dotnet msbuild", "dotnet nuget", "dotnet msbuild", "dotnet pack", "dotnet nuget"}
+	if strings.Join(got, " | ") != strings.Join(want, " | ") {
+		t.Errorf("commands = %v, want %v", got, want)
+	}
+	push := exec.calls[len(exec.calls)-1].args
+	if len(push) != 4 || push[1] != "push" || !strings.HasSuffix(push[2], "Martin.Widget.1.1.0.nupkg") || push[3] != "--skip-duplicate" {
+		t.Errorf("push argv = %v", push)
+	}
+
+	m, err := r.ReadFile("Widget.csproj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m != strings.Replace(proj, "1.0.0", "1.1.0", 1) {
+		t.Errorf("Widget.csproj changed beyond the version:\n%s", m)
+	}
+	if !strings.Contains(tags(t, r), "v1.1.0") {
+		t.Errorf("missing tag v1.1.0 (tags: %q)", tags(t, r))
+	}
+	if status, err := r.Run("status", "--porcelain"); err != nil || strings.TrimSpace(status) != "" {
+		t.Errorf("the bumped project file must be committed: %q, %v", status, err)
+	}
+	if warn.String() != "" {
+		t.Errorf("unexpected warnings: %s", warn.String())
+	}
 }

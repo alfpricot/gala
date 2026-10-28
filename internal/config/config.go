@@ -27,12 +27,13 @@ const (
 // ManagerName selects the package manager adapter.
 type ManagerName string
 
-// The four supported managers. Go is tag-only: the tag is the publish.
+// The supported managers. Go is tag-only: the tag is the publish.
 const (
 	ManagerGo    ManagerName = "go"
 	ManagerNpm   ManagerName = "npm"
 	ManagerCargo ManagerName = "cargo"
 	ManagerPyPI  ManagerName = "pypi"
+	ManagerNuGet ManagerName = "nuget"
 )
 
 // Package is one declared monorepo package. Declaration order is publish
@@ -111,12 +112,12 @@ func Load(path string) (*Config, error) {
 	}
 
 	switch f.Manager {
-	case string(ManagerGo), string(ManagerNpm), string(ManagerCargo), string(ManagerPyPI):
+	case string(ManagerGo), string(ManagerNpm), string(ManagerCargo), string(ManagerPyPI), string(ManagerNuGet):
 		cfg.Manager = ManagerName(f.Manager)
 	case "":
-		return nil, fmt.Errorf("%s: missing required key \"manager\" (\"go\", \"npm\", \"cargo\", or \"pypi\")", path)
+		return nil, fmt.Errorf("%s: missing required key \"manager\" (\"go\", \"npm\", \"cargo\", \"pypi\", or \"nuget\")", path)
 	default:
-		return nil, fmt.Errorf("%s: invalid manager %q (want \"go\", \"npm\", \"cargo\", or \"pypi\")", path, f.Manager)
+		return nil, fmt.Errorf("%s: invalid manager %q (want \"go\", \"npm\", \"cargo\", \"pypi\", or \"nuget\")", path, f.Manager)
 	}
 
 	cfg.Publish = f.Publish != nil && *f.Publish

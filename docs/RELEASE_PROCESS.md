@@ -55,6 +55,7 @@ A promotion that releases nothing still leaves `dev` one merge commit behind `ma
 | npm | `npm login` or `NODE_AUTH_TOKEN` | `npm whoami` runs as a preflight when `publish = true` |
 | cargo | `CARGO_REGISTRY_TOKEN` | checked by `cargo publish` itself |
 | pypi (uv) | `UV_PUBLISH_TOKEN` | `uv build` then `uv publish` |
+| nuget (dotnet) | `defaultPushSource` in `NuGet.config`, plus an API key from `dotnet nuget setapikey` (user-level config) or a `%NUGET_AUTH_TOKEN%` reference in `<packageSourceCredentials>` | never commit the key; the preflight checks the push source and packability when `publish = true` |
 | go | — | the tag *is* the publish |
 | GitHub Release | `GITHUB_TOKEN` or `GH_TOKEN` | absent token = warn and skip, never fail after tags are pushed |
 
@@ -64,7 +65,7 @@ This repository's rulesets block direct pushes to `main` and `dev` and the creat
 
 gala has no resume command — recovery is manual by design, and the failure message prints the exact state: which tag is pushed, which package failed, the tool output, and the command to run.
 
-- **Tag pushed, publish failed:** fix the registry problem, then run the printed command (`npm publish` / `cargo publish` / `uv publish`) in the package directory. The tag, changelog, and GitHub Release are already correct.
+- **Tag pushed, publish failed:** fix the registry problem, then run the printed command (`npm publish` / `cargo publish` / `uv publish` / `dotnet nuget push`) in the package directory. The tag, changelog, and GitHub Release are already correct.
 - **GitHub Release failed:** the tags are pushed; create the release by hand from the existing tag, or fix API access and re-run it.
 - **Sync push rejected:** `dev` has commits the release does not. The warning prints the merge command; `dev` was never force-pushed.
 - **Never** delete and recreate a tag that has already been published to a registry.
