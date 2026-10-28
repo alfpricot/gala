@@ -196,7 +196,7 @@ func TestSyncRejectionWarnsWithoutFailing(t *testing.T) {
 	mustContain(t, out.String(), "sync    main → dev", "the transcript shows the sync step")
 }
 
-// TestMonorepoRelease covers P4: declared packages, path-scoped planning, per
+// TestMonorepoRelease covers the monorepo driver: declared packages, path-scoped planning, per
 // package tags, one release commit, and publishes in declaration order.
 func TestMonorepoRelease(t *testing.T) {
 	cfg := `kind = "monorepo"
@@ -347,7 +347,7 @@ path = "packages/cli"
 
 func filepathSlash(p string) string { return strings.ReplaceAll(p, "\\", "/") }
 
-// TestReleasePerManager is the P3 exit check: `gala release` completes on an
+// TestReleasePerManager checks that `gala release` completes on an
 // app fixture for every registry manager, real git underneath and the
 // argv-capture runner standing in for the lock and publish commands.
 func TestReleasePerManager(t *testing.T) {
