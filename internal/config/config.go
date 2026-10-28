@@ -1,10 +1,12 @@
-// Package config loads gala.toml, applies defaults, and rejects any key gala
-// does not know. A typo silently dropping its default is the failure mode
-// this tool exists to avoid, so unknown keys are a hard error.
+// Package config discovers gala.toml or .gala.toml, applies defaults, and
+// rejects any key gala does not know. A typo silently dropping its default is
+// the failure mode this tool exists to avoid, so unknown keys are a hard error.
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,7 +43,7 @@ type Package struct {
 	TagPrefix string `toml:"tagPrefix"`
 }
 
-// Config is a validated gala.toml.
+// Config is a validated config file.
 type Config struct {
 	Kind            Kind
 	Manager         ManagerName
@@ -58,9 +60,9 @@ type Config struct {
 	Source string
 }
 
-// file mirrors gala.toml. Pointers distinguish "absent" from an explicit
-// false, because two defaults (githubRelease, syncBranch) are not the zero
-// value.
+// file mirrors the config file — gala.toml and .gala.toml share one schema.
+// Pointers distinguish "absent" from an explicit false, because two defaults
+// (githubRelease, syncBranch) are not the zero value.
 type file struct {
 	Kind            string    `toml:"kind"`
 	Manager         string    `toml:"manager"`
@@ -74,7 +76,7 @@ type file struct {
 	Packages        []Package `toml:"package"`
 }
 
-// Load reads, decodes, and validates a gala.toml at path.
+// Load reads, decodes, and validates the config file at path.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -244,8 +246,43 @@ func (c *Config) ReleaseBranchesList() string {
 	return strings.Join(c.ReleaseBranches, ", ")
 }
 
-// ConfigName is the one config file name gala knows.
-const ConfigName = "gala.toml"
+// The two config file names gala knows. Both live at the repository root;
+// a repository uses one or the other, never both.
+const (
+	// ConfigName is the plain name, the default choice.
+	ConfigName = "gala.toml"
+	// DotConfigName is the dotfile alternative, for repositories that keep
+	// tool configuration in dotfiles alongside .editorconfig and friends.
+	DotConfigName = ".gala.toml"
+)
+
+// Find returns the config file path at root. Exactly one of the known names
+// may be there: none means there is nothing to read, and two means a stale
+// file could win silently — the choice gala refuses to make for you.
+func Find(root string) (string, error) {
+	found := make([]string, 0, 2)
+	for _, name := range []string{ConfigName, DotConfigName} {
+		candidate := filepath.Join(root, name)
+		// Lstat reports the name itself, so a dangling symlink still counts
+		// as present and the two-name guard stays honest. Any other
+		// inspection failure is reported, never read as absence.
+		if _, err := os.Lstat(candidate); err == nil {
+			found = append(found, name)
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("%s: cannot inspect config file: %w", candidate, err)
+		}
+	}
+	switch len(found) {
+	case 1:
+		return filepath.Join(root, found[0]), nil
+	case 0:
+		return "", fmt.Errorf("%s: no config file — gala reads %s or %s at the "+
+			"repository root (--config overrides discovery)", root, ConfigName, DotConfigName)
+	default:
+		return "", fmt.Errorf("%s: both %s and %s exist — gala reads exactly one config "+
+			"file, so delete the one you are not using", root, found[0], found[1])
+	}
+}
 
 func escapesRoot(path string) bool {
 	clean := filepath.ToSlash(filepath.Clean(path))

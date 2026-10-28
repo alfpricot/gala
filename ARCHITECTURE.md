@@ -22,7 +22,7 @@ Builds the plan and runs the steps: read-only checks, the per-package plan, live
 
 ### [internal/config](internal/config)
 
-Loads `gala.toml`, applies defaults, and rejects any key it does not know, so a typo cannot silently fall back to a default.
+Discovers `gala.toml` or `.gala.toml` at the repository root (neither, or both, is an error), applies defaults, and rejects any key it does not know, so a typo cannot silently fall back to a default.
 
 ### [internal/commit](internal/commit)
 

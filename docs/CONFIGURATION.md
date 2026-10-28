@@ -2,7 +2,7 @@
 
 Every `gala.toml` key, its default, and a monorepo example.
 
-`gala.toml` at the repository root (`--config` overrides discovery). **A key gala does not know is a hard error** — a typo silently dropping its default is the failure mode this tool exists to avoid.
+`gala.toml` or `.gala.toml` at the repository root — exactly one of the two; both present is an error, and gala will not pick between them. `--config` overrides discovery. **A key gala does not know is a hard error** — a typo silently dropping its default is the failure mode this tool exists to avoid.
 
 ```toml
 # single-package repository
