@@ -8,7 +8,7 @@ The name is a gala apple, and a gala is a celebration: `gala release` reads as t
 
 gala covers the release steps and leaves out everything around them: no recovery tooling, no dependency-graph machinery, no provenance, no notifications. See [What gala does not do](#what-gala-does-not-do).
 
-## Install
+## Installation
 
 In consumer CI, pin to a release tag (reproducible builds):
 
@@ -66,15 +66,15 @@ gala plan — nothing to release (branch dev)
 gala → no release: no commits since v0.1.1
 ```
 
-## Configuration
+### Configuration
 
 gala reads `gala.toml` — or the dotfile `.gala.toml`, for repositories that keep tool config in dotfiles — at the repository root. A repository may have one or the other, never both: two config files is an error, because letting a stale one win silently is the failure gala exists to avoid. A key gala does not know is a hard error. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for every key, default, and a monorepo example.
 
-## How releases work
+### How releases work
 
 How versions are chosen, the order of the release steps, the `dev` → `main` branch model, authentication, and manual recovery from a partial release are in [docs/RELEASE_PROCESS.md](docs/RELEASE_PROCESS.md). The structure of the code is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## What gala does not do
+### What gala does not do
 
 - No resume/repair: if a registry publish fails after the tag is pushed, gala stops and prints the exact state plus the manual recovery commands.
 - No prerelease channels: prerelease tags (`v2.0.0-rc.1`) are ignored when planning; gala never creates them.
