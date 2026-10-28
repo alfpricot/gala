@@ -7,11 +7,28 @@ import (
 // Run executes one mode against the repository: load, check, plan, preflight,
 // and (unless the mode stops earlier) execute. The returned error is a
 // failure (exit 1); "nothing to release" is not an error (exit 0).
+//
+// A release always reports `released` to GITHUB_OUTPUT: execute writes
+// released=true once the tags are pushed, and every other exit (nothing due,
+// or a failure before the push) writes released=false here. A write failure
+// only warns, so it never changes the exit code.
 func Run(opts *Options, mode Mode) error {
+	var e *Engine
+	err := run(opts, mode, &e)
+	if mode == ModeRelease && (e == nil || !e.outputWritten) {
+		if werr := appendGitHubOutput(opts.GitHubOutput, false, nil); werr != nil {
+			opts.warnf("%v", werr)
+		}
+	}
+	return err
+}
+
+func run(opts *Options, mode Mode, engine **Engine) error {
 	e, err := Open(opts)
 	if err != nil {
 		return err
 	}
+	*engine = e
 
 	// Step 1: read-only checks. `plan` skips them — it works anywhere.
 	if mode != ModePlan {
@@ -31,13 +48,6 @@ func Run(opts *Options, mode Mode) error {
 	if len(plan.Due()) == 0 {
 		if mode != ModePlan {
 			_, _ = io.WriteString(opts.out(), "\nrelease: nothing to do — no tags, no commits, no writes.\n")
-		}
-		// Nothing to release stays exit 0: an unwritable GITHUB_OUTPUT only
-		// warns here, the same as after a real release.
-		if mode == ModeRelease {
-			if err := e.writeGitHubOutput(nil); err != nil {
-				opts.warnf("%v", err)
-			}
 		}
 		return nil
 	}

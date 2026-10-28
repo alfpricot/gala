@@ -127,7 +127,9 @@ pattern = '^(\S+)'
 
 `preRelease` and `postBump` are lists of commands. Top-level commands run from the repository root. A `[[package]]`'s own commands run from its directory, and only when that package releases. Package commands run first, in declaration order, then the top-level ones, and gala stops at the first failure.
 
-Commands run directly, not through a shell: words split on spaces, quotes group a word with spaces in it, and nothing is expanded. Use a package script (`npm run …`, `make …`, `just …`) or a checked-in script for anything that needs a pipe, `cd`, or a variable. The preflight checks that each command's program is on `PATH` (or, for a path like `./tools/gen.sh`, that the file exists relative to where the command runs).
+Commands run directly, not through a shell: words split on spaces, quotes group a word with spaces in it, and nothing is expanded. Use a package script (`npm run …`, `make …`, `just …`) or a checked-in script for anything that needs a pipe, `cd`, or a variable. The preflight resolves each command's program the way the run will: a bare name on `PATH`, or a path like `./tools/gen.sh` relative to where the command runs, which on Windows also tries the `PATHEXT` extensions (`./scripts/build` finds `build.cmd`) and elsewhere must be executable.
+
+On Windows, a program that resolves to a `.cmd` or `.bat` file (`npm`, `npx`, and `pnpm` are batch shims) runs through `cmd.exe`, which would expand `%VAR%` and treat `&`, `|`, `<`, `>`, and `^` as operators. To keep the promise that nothing is expanded, the preflight refuses such a command when an argument contains any of those characters or a double quote; move that logic into a package script or a checked-in script.
 
 ```toml
 preRelease = ["make check"]
@@ -208,18 +210,21 @@ When `GITHUB_OUTPUT` is set, `gala release` appends step outputs for the job:
 
 | Output | When | Value |
 | --- | --- | --- |
-| `released` | always | `true` once the tags are pushed, `false` when nothing was due |
+| `released` | every `gala release` run | `true` once the tags are pushed, `false` when nothing was due or the run failed before the push |
 | `tag` | exactly one tag pushed | that tag, such as `v1.2.3` |
 | `version` | `kind = "app"` released | the new version, such as `1.2.3` |
 | `tags` | a release happened | every pushed tag, one per line |
 
-The outputs are written as soon as the atomic push succeeds, so a later failure (the GitHub Release or a publish) still reports the tags that exist. `plan` and `--dry-run` write nothing.
+The release outputs are written as soon as the atomic push succeeds, so a later failure (the GitHub Release or a publish) still reports the tags that exist; a run that stops before the push writes `released=false`. A failure to write `GITHUB_OUTPUT` only warns and never changes the exit code. `plan` and `--dry-run` write nothing.
+
+The example below dispatches a publish workflow for an app's single tag. `gh` in Actions needs a token in `GH_TOKEN`, and the job needs `actions: write` permission to dispatch. A monorepo release that pushes several tags sets no `tag`, so the step also checks it is not empty; loop over `tags` instead to dispatch one run per package.
 
 ```yaml
 - id: gala
   run: gala release
-- if: steps.gala.outputs.released == 'true'
+- if: steps.gala.outputs.released == 'true' && steps.gala.outputs.tag != ''
   env:
+    GH_TOKEN: ${{ github.token }}
     TAG: ${{ steps.gala.outputs.tag }}
   run: gh workflow run release.yml --ref "$TAG" -f "tag=$TAG"
 ```
