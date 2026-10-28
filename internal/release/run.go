@@ -32,6 +32,9 @@ func Run(opts *Options, mode Mode) error {
 		if mode != ModePlan {
 			_, _ = io.WriteString(opts.out(), "\nrelease: nothing to do — no tags, no commits, no writes.\n")
 		}
+		if mode == ModeRelease {
+			return e.writeGitHubOutput(nil)
+		}
 		return nil
 	}
 	if mode == ModePlan {
@@ -39,16 +42,16 @@ func Run(opts *Options, mode Mode) error {
 	}
 
 	// Step 3: live preflights, skipped by plan, run by release and --dry-run.
-	publish := e.cfg.Publish && !opts.NoPublish
-	if err := e.preflight(plan, publish); err != nil {
+	allowPublish := !opts.NoPublish
+	if err := e.preflight(plan, allowPublish); err != nil {
 		return err
 	}
 
 	if mode == ModeDryRun {
-		_, _ = io.WriteString(opts.out(), FormatDryRun(e, plan, publish))
+		_, _ = io.WriteString(opts.out(), FormatDryRun(e, plan, allowPublish))
 		return nil
 	}
 
 	_, _ = io.WriteString(opts.out(), "\n")
-	return e.execute(plan, publish)
+	return e.execute(plan, allowPublish)
 }

@@ -20,7 +20,9 @@ type Engine struct {
 	repo *git.Repo
 	cfg  *config.Config
 	root string
-	mgr  manager.Manager
+	// mgrs holds one adapter per manager the config names: the top-level
+	// manager and any per-package override.
+	mgrs map[config.ManagerName]manager.Manager
 
 	branch    string
 	branchErr error
@@ -62,12 +64,23 @@ func Open(opts *Options) (*Engine, error) {
 		return nil, err
 	}
 
-	mgr, err := manager.New(cfg.Manager, opts.Exec)
-	if err != nil {
-		return nil, err
+	mgrs := map[config.ManagerName]manager.Manager{}
+	names := []config.ManagerName{cfg.Manager}
+	for _, p := range cfg.Packages {
+		names = append(names, p.Manager)
+	}
+	for _, name := range names {
+		if name == "" || mgrs[name] != nil {
+			continue
+		}
+		mgr, err := manager.New(name, opts.Exec)
+		if err != nil {
+			return nil, err
+		}
+		mgrs[name] = mgr
 	}
 
-	e := &Engine{opts: opts, repo: repo, cfg: cfg, root: root, mgr: mgr}
+	e := &Engine{opts: opts, repo: repo, cfg: cfg, root: root, mgrs: mgrs}
 	e.branch, e.branchErr = repo.CurrentBranch()
 	if e.branchErr != nil {
 		e.branch = "(detached)"
@@ -84,7 +97,11 @@ func (e *Engine) Config() *config.Config { return e.cfg }
 // PackagePlan is one package's slice of the plan.
 type PackagePlan struct {
 	Name      string
-	Dir       string // repo-relative, "." for an app
+	Manager   manager.Manager
+	Publish   bool                 // this package publishes when the run allows it
+	Files     []config.VersionFile // extra version files, repository-relative
+	Hooks     config.Hooks         // the package's own hooks, run from AbsDir
+	Dir       string               // repo-relative, "." for an app
 	AbsDir    string
 	TagPrefix string
 	Tag       string // anchor tag, "" when the plan starts from history/manifest
@@ -121,10 +138,14 @@ func (p *Plan) Due() []*PackagePlan {
 // spec is a resolved package: name (from config or manifest), directories,
 // and the tag prefix its tags carry.
 type spec struct {
-	name   string
-	absDir string
-	relDir string
-	prefix string
+	name    string
+	absDir  string
+	relDir  string
+	prefix  string
+	mgr     manager.Manager
+	publish bool
+	files   []config.VersionFile
+	hooks   config.Hooks
 }
 
 // Plan computes the release plan (pipeline step 2). It writes nothing.
@@ -157,9 +178,18 @@ func (e *Engine) Plan(now time.Time) (*Plan, error) {
 
 	bases := make([]semver.Version, len(specs))
 	for i, s := range specs {
-		mv, ok, err := e.mgr.ManifestVersion(s.absDir)
+		mv, ok, err := s.mgr.ManifestVersion(s.absDir)
 		if err != nil {
 			return nil, fmt.Errorf("package %q: %w", s.name, err)
+		}
+		// A manager with no manifest version (go, none) takes the package's
+		// first version file as its manifest, so adopting gala starts from the
+		// version the project already states instead of 0.0.0.
+		if !ok && len(s.files) > 0 {
+			if mv, err = manager.ReadVersionFile(e.root, s.files[0]); err != nil {
+				return nil, fmt.Errorf("package %q: versionFile %w", s.name, err)
+			}
+			ok = true
 		}
 		if anchors[i] != "" && ok && semver.Compare(mv, anchorVersions[i]) != 0 {
 			return nil, e.driftError(s, anchors[i], mv)
@@ -171,6 +201,11 @@ func (e *Engine) Plan(now time.Time) (*Plan, error) {
 			bases[i] = mv // adoption path: an existing project keeps its version
 		default:
 			bases[i] = semver.Version{} // go with no tag: 0.0.0
+		}
+	}
+	for i, s := range specs {
+		if err := e.checkVersionFiles(s, bases[i]); err != nil {
+			return nil, err
 		}
 	}
 
@@ -197,11 +232,15 @@ func (e *Engine) specs() ([]spec, error) {
 	if e.cfg.Kind == config.KindApp {
 		// The app's name appears only in prose, so a manifest read failure
 		// falls back to the directory name instead of failing the plan.
-		name, err := e.mgr.PackageName(e.root)
+		mgr := e.mgrs[e.cfg.Manager]
+		name, err := mgr.PackageName(e.root)
 		if err != nil {
 			name = filepath.Base(e.root)
 		}
-		return []spec{{name: name, absDir: e.root, relDir: ".", prefix: e.cfg.TagPrefix}}, nil
+		return []spec{{
+			name: name, absDir: e.root, relDir: ".", prefix: e.cfg.TagPrefix,
+			mgr: mgr, publish: e.cfg.Publish, files: e.cfg.VersionFiles,
+		}}, nil
 	}
 
 	seen := map[string]string{}
@@ -209,9 +248,10 @@ func (e *Engine) specs() ([]spec, error) {
 	for _, p := range e.cfg.Packages {
 		name := p.Name
 		absDir := filepath.Join(e.root, filepath.FromSlash(p.Path))
+		mgr := e.mgrs[p.Manager]
 		if name == "" {
 			var err error
-			name, err = e.mgr.PackageName(absDir)
+			name, err = mgr.PackageName(absDir)
 			if err != nil {
 				return nil, fmt.Errorf("package %q: %w", p.Path, err)
 			}
@@ -226,7 +266,10 @@ func (e *Engine) specs() ([]spec, error) {
 		if prefix == "" {
 			prefix = name + "/v"
 		}
-		specs = append(specs, spec{name: name, absDir: absDir, relDir: p.Path, prefix: prefix})
+		specs = append(specs, spec{
+			name: name, absDir: absDir, relDir: p.Path, prefix: prefix,
+			mgr: mgr, publish: p.Publish, files: p.VersionFiles, hooks: p.Hooks,
+		})
 	}
 	return specs, nil
 }
@@ -325,6 +368,10 @@ func (e *Engine) unionRange(anchors []string) ([]string, error) {
 func (e *Engine) buildPackagePlan(s spec, anchor string, base semver.Version, commits []commit.Commit, date string, monorepo bool) (*PackagePlan, error) {
 	pkg := &PackagePlan{
 		Name:      s.name,
+		Manager:   s.mgr,
+		Publish:   s.publish,
+		Files:     s.files,
+		Hooks:     s.hooks,
 		Dir:       s.relDir,
 		AbsDir:    s.absDir,
 		TagPrefix: s.prefix,
@@ -374,7 +421,7 @@ func (e *Engine) buildPackagePlan(s spec, anchor string, base semver.Version, co
 
 	// Plan-dependent ecosystem check, before anything is written: a Go module
 	// must carry /vN in its path once the major is 2 or higher.
-	if err := e.mgr.CheckVersion(s.absDir, pkg.Next); err != nil {
+	if err := s.mgr.CheckVersion(s.absDir, pkg.Next); err != nil {
 		return nil, fmt.Errorf("package %q: %w", s.name, err)
 	}
 	return pkg, nil

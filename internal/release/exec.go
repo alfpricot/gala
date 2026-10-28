@@ -8,6 +8,7 @@ import (
 	"github.com/alfpricot/gala/internal/changelog"
 	"github.com/alfpricot/gala/internal/config"
 	"github.com/alfpricot/gala/internal/github"
+	"github.com/alfpricot/gala/internal/manager"
 )
 
 // execute is pipeline steps 4 to 11. Everything that could fail has already
@@ -22,20 +23,47 @@ func (e *Engine) execute(plan *Plan, publish bool) error {
 	var manifests []string
 	var lockfiles []string
 	for _, pkg := range due {
-		if err := e.mgr.SetVersion(pkg.AbsDir, pkg.Next); err != nil {
+		if err := pkg.Manager.SetVersion(pkg.AbsDir, pkg.Next); err != nil {
 			return fmt.Errorf("package %q: cannot write the manifest: %w", pkg.Name, err)
 		}
 	}
+	// Extra version files are written before the lockfile refresh, so a
+	// Cargo.toml or pyproject.toml among them lands in its lockfile too.
+	var versionFiles []string
 	for _, pkg := range due {
-		locks, err := e.mgr.RefreshLock(pkg.AbsDir, e.root)
+		for _, vf := range pkg.Files {
+			if err := manager.WriteVersionFile(e.root, vf, pkg.Next); err != nil {
+				return fmt.Errorf("package %q: cannot write versionFile %w", pkg.Name, err)
+			}
+			versionFiles = append(versionFiles, vf.Path)
+		}
+	}
+	// refreshed records lockfiles a manager's tool has already rewritten after
+	// those writes, so a version file sharing the lockfile does not run the
+	// tool again. npm is left out: for a single package it reports the lock
+	// that `npm version` kept in step without running anything afterwards.
+	refreshed := map[string]bool{}
+	for _, pkg := range due {
+		locks, err := pkg.Manager.RefreshLock(pkg.AbsDir, e.root)
 		if err != nil {
 			return fmt.Errorf("package %q: %w", pkg.Name, err)
 		}
 		lockfiles = append(lockfiles, locks...)
-		if m := e.mgr.Manifest(pkg.AbsDir, e.root); m != "" {
+		if pkg.Manager.Name() != string(config.ManagerNpm) {
+			for _, l := range locks {
+				refreshed[l] = true
+			}
+		}
+		if m := pkg.Manager.Manifest(pkg.AbsDir, e.root); m != "" {
 			manifests = append(manifests, m)
 		}
 	}
+	fileLocks, err := manager.RunLockCommands(e.opts.Exec, e.root,
+		manager.VersionFileLocks(e.root, dueVersionFiles(due)), refreshed)
+	if err != nil {
+		return err
+	}
+	lockfiles = append(lockfiles, fileLocks...)
 
 	entries := make([]string, 0, len(due))
 	for _, pkg := range due {
@@ -46,11 +74,23 @@ func (e *Engine) execute(plan *Plan, publish bool) error {
 		return fmt.Errorf("cannot write the changelog: %w", err)
 	}
 
+	// The postBump commands regenerate whatever embeds the version, before
+	// staging so their output joins the release commit. Nothing is committed
+	// or pushed yet, so a failure leaves only local writes behind.
+	scopes := e.scopes(due)
+	if err := e.postBump(scopes); err != nil {
+		return err
+	}
+
 	// Step 5: stage exactly what changed — anything else dirty is an error,
-	// not a silent extra stage.
+	// not a silent extra stage. Paths matching postBumpPaths are the one
+	// declared exception.
 	expected := map[string]bool{filepath.ToSlash(e.cfg.Changelog): true}
 	for _, m := range manifests {
 		expected[m] = true
+	}
+	for _, v := range versionFiles {
+		expected[v] = true
 	}
 	for _, l := range lockfiles {
 		expected[l] = true
@@ -61,7 +101,7 @@ func (e *Engine) execute(plan *Plan, publish bool) error {
 	}
 	var stage, extras []string
 	for _, c := range changed {
-		if expected[c] {
+		if expected[c] || allowedPostBump(scopes, c) {
 			stage = append(stage, c)
 		} else {
 			extras = append(extras, c)
@@ -69,7 +109,7 @@ func (e *Engine) execute(plan *Plan, publish bool) error {
 	}
 	if len(extras) > 0 {
 		return fmt.Errorf("unexpected changes after the version writes; gala stages only manifests, "+
-			"lockfiles, and the changelog:\n  %s", strings.Join(extras, "\n  "))
+			"version files, lockfiles, the changelog, and postBumpPaths:\n  %s", strings.Join(extras, "\n  "))
 	}
 	if err := e.repo.Add(stage...); err != nil {
 		return err
@@ -105,6 +145,12 @@ func (e *Engine) execute(plan *Plan, publish bool) error {
 		return fmt.Errorf("atomic push failed; nothing was pushed and no release was published: %w", err)
 	}
 	e.note("push    %s → %s (%d tag%s, atomic)", e.branch, e.cfg.Remote, len(due), plural(len(due)))
+
+	// The tags exist remotely from here on, so the workflow outputs say so
+	// even if a later step fails.
+	if err := e.writeGitHubOutput(due); err != nil {
+		e.opts.warnf("%v", err)
+	}
 
 	// Step 9: fast-forward the integration branch. A rejection warns with the
 	// manual merge command; it never fails a release and is never forced.
@@ -170,24 +216,40 @@ func (e *Engine) githubReleases(due []*PackagePlan) error {
 	return nil
 }
 
-// publish pushes to the registry in declaration order. A failure reports the
-// tool output and the manual recovery command, then exits non-zero.
-func (e *Engine) publish(due []*PackagePlan, publish bool) error {
-	if !publish {
+// publish pushes to the registry in declaration order, each package through
+// its own manager. A failure reports the tool output and the manual recovery
+// command, then exits non-zero.
+func (e *Engine) publish(due []*PackagePlan, allowPublish bool) error {
+	publishing := publishing(due, allowPublish)
+	if len(publishing) == 0 {
 		e.note("publish skipped (publish = false)")
 		return nil
 	}
-	for _, pkg := range due {
-		e.note("publish %s (%s) ...", pkg.Name, e.mgr.Name())
-		if err := e.mgr.Publish(pkg.AbsDir); err != nil {
+	for _, pkg := range publishing {
+		e.note("publish %s (%s) ...", pkg.Name, pkg.Manager.Name())
+		if err := pkg.Manager.Publish(pkg.AbsDir); err != nil {
 			return fmt.Errorf("publish failed for package %q: %w\n"+
 				"  the tag %s is pushed and the GitHub Release exists; gala has no resume command — "+
 				"fix the registry problem, then run:\n    %s",
-				pkg.Name, err, pkg.NextTag, e.mgr.Recovery(pkg.AbsDir, e.root))
+				pkg.Name, err, pkg.NextTag, pkg.Manager.Recovery(pkg.AbsDir, e.root))
 		}
 		e.note("        ok")
 	}
 	return nil
+}
+
+// publishing returns the due packages that publish in this run.
+func publishing(due []*PackagePlan, allowPublish bool) []*PackagePlan {
+	if !allowPublish {
+		return nil
+	}
+	var out []*PackagePlan
+	for _, pkg := range due {
+		if pkg.Publish {
+			out = append(out, pkg)
+		}
+	}
+	return out
 }
 
 // releaseCommit builds the commit subject and body for step 6.
@@ -213,8 +275,11 @@ func releaseCommit(monorepo bool, due []*PackagePlan) (string, string) {
 func describeWrites(e *Engine, due []*PackagePlan) string {
 	var files []string
 	for _, pkg := range due {
-		if m := e.mgr.Manifest(pkg.AbsDir, e.root); m != "" {
+		if m := pkg.Manager.Manifest(pkg.AbsDir, e.root); m != "" {
 			files = append(files, fmt.Sprintf("%s → %s", m, pkg.Next))
+		}
+		for _, vf := range pkg.Files {
+			files = append(files, fmt.Sprintf("%s → %s", vf.Path, pkg.Next))
 		}
 	}
 	files = append(files, e.cfg.Changelog)

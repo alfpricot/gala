@@ -53,6 +53,7 @@ type call struct {
 	dir  string
 	name string
 	args []string
+	env  []string // set for hook commands, which go through RunEnv
 }
 
 // captureRunner stands in for npm/cargo/uv: argv is asserted, the binary
@@ -64,7 +65,11 @@ type captureRunner struct {
 }
 
 func (c *captureRunner) Run(dir, name string, args ...string) (string, error) {
-	c.calls = append(c.calls, call{dir: dir, name: name, args: append([]string(nil), args...)})
+	return c.RunEnv(dir, nil, name, args...)
+}
+
+func (c *captureRunner) RunEnv(dir string, env []string, name string, args ...string) (string, error) {
+	c.calls = append(c.calls, call{dir: dir, name: name, args: append([]string(nil), args...), env: env})
 	if c.respond != nil {
 		return c.respond(dir, name, args)
 	}
@@ -83,6 +88,7 @@ func testOptions(r *gittest.Repo, exec manager.Runner) (*Options, *bytes.Buffer,
 	opts.Stdout = &out
 	opts.Stderr = &warn
 	opts.Token = ""
+	opts.GitHubOutput = "" // never append to the real file when the suite runs in Actions
 	opts.LookPath = func(string) error { return nil }
 	opts.Now = func() time.Time { return time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC) }
 	if exec != nil {
