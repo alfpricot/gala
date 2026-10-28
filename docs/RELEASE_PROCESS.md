@@ -55,7 +55,7 @@ A promotion that releases nothing still leaves `dev` one merge commit behind `ma
 | npm | `npm login` or `NODE_AUTH_TOKEN` | `npm whoami` runs as a preflight when `publish = true` |
 | cargo | `CARGO_REGISTRY_TOKEN` | checked by `cargo publish` itself |
 | pypi (uv) | `UV_PUBLISH_TOKEN` | `uv build` then `uv publish` |
-| nuget (dotnet) | a `defaultPushSource` and its credentials in the repository's `NuGet.config` | `dotnet pack` then `dotnet nuget push --skip-duplicate` |
+| nuget (dotnet) | `defaultPushSource` in `NuGet.config`, plus an API key from `dotnet nuget setapikey` (user-level config) or a `%NUGET_AUTH_TOKEN%` reference in `<packageSourceCredentials>` | never commit the key; the preflight checks the push source and packability when `publish = true` |
 | go | — | the tag *is* the publish |
 | GitHub Release | `GITHUB_TOKEN` or `GH_TOKEN` | absent token = warn and skip, never fail after tags are pushed |
 

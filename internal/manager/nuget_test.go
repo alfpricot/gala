@@ -24,10 +24,18 @@ const widgetProj = `<Project Sdk="Microsoft.NET.Sdk">
 func msbuildAnswers(version string) *captureRunner {
 	return &captureRunner{respond: func(_, _ string, args []string) (string, error) {
 		if args[0] == "msbuild" {
-			return version + "\n", nil
+			return evaluation(version, "true"), nil
 		}
 		return "", nil
 	}}
+}
+
+// evaluation is the JSON `dotnet msbuild` prints for two -getProperty
+// switches, after a warning the decoder must skip.
+func evaluation(version, packable string) string {
+	return "P.csproj(3,3): warning MSB4011: a.props cannot be imported again.\r\n" +
+		"{\r\n  \"Properties\": {\r\n    \"PackageVersion\": \"" + version + "\",\r\n" +
+		"    \"IsPackable\": \"" + packable + "\"\r\n  }\r\n}\r\n"
 }
 
 func TestNugetManifestRead(t *testing.T) {
@@ -94,7 +102,7 @@ func TestNugetSetVersionPreservesBytes(t *testing.T) {
 	}
 
 	proj := filepath.Join(dir, "Widget.csproj")
-	wantArgv := "dotnet msbuild " + proj + " -p:Configuration=Release -getProperty:PackageVersion"
+	wantArgv := "dotnet msbuild " + proj + " -p:Configuration=Release -getProperty:PackageVersion -getProperty:IsPackable"
 	if got := r.argvs(); len(got) != 1 || got[0] != wantArgv {
 		t.Errorf("argv = %v, want [%s]", got, wantArgv)
 	}
@@ -109,7 +117,7 @@ func TestNugetSetVersionRestoresOnOverride(t *testing.T) {
 	if err == nil {
 		t.Fatal("a version MSBuild does not honor must be refused")
 	}
-	if !strings.Contains(err.Error(), "Directory.Build.props") {
+	if !strings.Contains(err.Error(), "Directory.Build.targets") {
 		t.Errorf("error should name the likely cause: %v", err)
 	}
 	data, _ := os.ReadFile(filepath.Join(dir, "Widget.csproj"))
@@ -132,13 +140,51 @@ func TestNugetSetVersionRestoresOnOverride(t *testing.T) {
 
 func TestNugetPreflight(t *testing.T) {
 	dir := tempWith(t, "Widget.csproj", widgetProj)
-	n, _ := New("nuget", msbuildAnswers("1.0.0"))
+	r := msbuildAnswers("1.0.0")
+	n, _ := New("nuget", r)
 	if err := n.Preflight(dir, false); err != nil {
 		t.Errorf("an agreeing evaluation passes: %v", err)
 	}
+	if len(r.calls) != 1 {
+		t.Errorf("publishing off checks the version only: %v", r.argvs())
+	}
+	if err := n.Preflight(dir, true); err != nil {
+		t.Errorf("a packable project with a push source passes: %v", err)
+	}
+	if got := r.argvs(); got[len(got)-1] != "dotnet nuget config get defaultPushSource" {
+		t.Errorf("publishing on must check the push source: %v", got)
+	}
+
 	n, _ = New("nuget", msbuildAnswers("2.0.0"))
 	if err := n.Preflight(dir, false); err == nil {
 		t.Error("an override must fail the preflight, so --dry-run reports it")
+	}
+}
+
+// TestNugetPreflightPublishFailures covers what would otherwise fail only
+// after the tag is pushed.
+func TestNugetPreflightPublishFailures(t *testing.T) {
+	dir := tempWith(t, "Widget.csproj", widgetProj)
+	unpackable := &captureRunner{respond: func(_, _ string, args []string) (string, error) {
+		return evaluation("1.0.0", "false"), nil
+	}}
+	n, _ := New("nuget", unpackable)
+	if err := n.Preflight(dir, false); err != nil {
+		t.Errorf("an unpackable project is fine when nothing publishes: %v", err)
+	}
+	if err := n.Preflight(dir, true); err == nil || !strings.Contains(err.Error(), "IsPackable") {
+		t.Errorf("an unpackable project must fail before the tag: %v", err)
+	}
+
+	noSource := &captureRunner{respond: func(_, _ string, args []string) (string, error) {
+		if args[0] == "nuget" {
+			return "error: Key 'defaultPushSource' not found.", errors.New("exit status 2")
+		}
+		return evaluation("1.0.0", ""), nil
+	}}
+	n, _ = New("nuget", noSource)
+	if err := n.Preflight(dir, true); err == nil || !strings.Contains(err.Error(), "defaultPushSource") {
+		t.Errorf("a missing push source must fail before the tag: %v", err)
 	}
 }
 
@@ -186,7 +232,7 @@ func TestNugetProjectFileDiscovery(t *testing.T) {
 }
 
 func TestNugetPublish(t *testing.T) {
-	dir := tempWith(t, "Widget.csproj", widgetProj)
+	dir := tempWith(t, "Widget.csproj", strings.Replace(widgetProj, "1.0.0", "1.1.0", 1))
 	var out string
 	r := &captureRunner{respond: func(_, _ string, args []string) (string, error) {
 		if args[0] == "pack" {
@@ -218,6 +264,43 @@ func TestNugetPublish(t *testing.T) {
 	n, _ = New("nuget", &captureRunner{})
 	if err := n.Publish(dir); err == nil || !strings.Contains(err.Error(), "no .nupkg") {
 		t.Errorf("a pack that produced nothing must fail: %v", err)
+	}
+}
+
+// TestNugetPublishRefusesAnotherVersion covers a version set during the
+// build: nothing is pushed when the package is not the released version.
+func TestNugetPublishRefusesAnotherVersion(t *testing.T) {
+	dir := tempWith(t, "Widget.csproj", strings.Replace(widgetProj, "1.0.0", "1.1.0", 1))
+	r := &captureRunner{respond: func(_, _ string, args []string) (string, error) {
+		if args[0] == "pack" {
+			out := args[len(args)-1]
+			for _, f := range []string{"Martin.Widget.1.1.0.nupkg", "Martin.Widget.1.1.1-alpha.0.5.nupkg"} {
+				if err := os.WriteFile(filepath.Join(out, f), nil, 0o644); err != nil {
+					return "", err
+				}
+			}
+		}
+		return "", nil
+	}}
+	n, _ := New("nuget", r)
+	err := n.Publish(dir)
+	if err == nil || !strings.Contains(err.Error(), "1.1.1-alpha.0.5") {
+		t.Fatalf("a package at another version must be refused: %v", err)
+	}
+	for _, argv := range r.argvs() {
+		if strings.Contains(argv, "nuget push") {
+			t.Errorf("nothing may be pushed: %v", r.argvs())
+		}
+	}
+}
+
+func TestCheckPackedVersion(t *testing.T) {
+	v := semver.MustParse("2.0.0-RC.1+build.7")
+	if err := checkPackedVersion([]string{"/out/Martin.Widget.win-x64.2.0.0-rc.1.nupkg"}, v); err != nil {
+		t.Errorf("build metadata and case are not part of the file name: %v", err)
+	}
+	if err := checkPackedVersion([]string{"/out/Martin.Widget.12.0.0-rc.1.nupkg"}, v); err == nil {
+		t.Error("a version that only ends the same way must be refused")
 	}
 }
 

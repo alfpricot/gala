@@ -478,8 +478,9 @@ func flatten(argvs [][]string) []string {
 }
 
 // TestReleaseNuget runs a nuget release end to end: MSBuild is asked for the
-// version before and after the write, the project file is bumped in place and
-// committed, and the package is packed and pushed after the tag.
+// version before and after the write, the push source is checked before the
+// write, the project file is bumped in place and committed, and the package is
+// packed and pushed after the tag.
 func TestReleaseNuget(t *testing.T) {
 	cfg := "kind = \"app\"\nmanager = \"nuget\"\npublish = true\ngithubRelease = false\n"
 	r, cleanup, err := gittest.New()
@@ -518,7 +519,8 @@ func TestReleaseNuget(t *testing.T) {
 			if err != nil {
 				return "", err
 			}
-			return versionRe.FindStringSubmatch(string(data))[1] + "\n", nil
+			v := versionRe.FindStringSubmatch(string(data))[1]
+			return `{"Properties": {"PackageVersion": "` + v + `", "IsPackable": ""}}` + "\n", nil
 		case "pack":
 			out := args[len(args)-1]
 			return "", os.WriteFile(filepath.Join(out, "Martin.Widget.1.1.0.nupkg"), nil, 0o644)
@@ -534,7 +536,7 @@ func TestReleaseNuget(t *testing.T) {
 	for _, c := range exec.calls {
 		got = append(got, c.name+" "+c.args[0])
 	}
-	want := []string{"dotnet msbuild", "dotnet msbuild", "dotnet pack", "dotnet nuget"}
+	want := []string{"dotnet msbuild", "dotnet nuget", "dotnet msbuild", "dotnet pack", "dotnet nuget"}
 	if strings.Join(got, " | ") != strings.Join(want, " | ") {
 		t.Errorf("commands = %v, want %v", got, want)
 	}

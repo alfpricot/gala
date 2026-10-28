@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -142,24 +143,33 @@ func (n *nugetManager) ManifestVersion(dir string) (semver.Version, bool, error)
 	if err != nil {
 		return semver.Version{}, false, err
 	}
-	props, err := p.versionProps()
+	v, err := p.version()
 	if err != nil {
 		return semver.Version{}, false, err
 	}
+	return v, true, nil
+}
+
+// version is the project file's declared version, checked as ManifestVersion
+// describes.
+func (p *project) version() (semver.Version, error) {
+	props, err := p.versionProps()
+	if err != nil {
+		return semver.Version{}, err
+	}
 	file := filepath.ToSlash(p.path)
-	raw := p.content[props[0].start:props[0].end]
-	value := strings.TrimSpace(raw)
+	value := strings.TrimSpace(p.content[props[0].start:props[0].end])
 	for _, pr := range props[1:] {
 		if other := strings.TrimSpace(p.content[pr.start:pr.end]); other != value {
-			return semver.Version{}, false, fmt.Errorf("%s: <%s>%s</%s> disagrees with <%s>%s</%s>; make them match",
+			return semver.Version{}, fmt.Errorf("%s: <%s>%s</%s> disagrees with <%s>%s</%s>; make them match",
 				file, pr.name, other, pr.name, props[0].name, value, props[0].name)
 		}
 	}
 	v, err := semver.Parse(value)
 	if err != nil {
-		return semver.Version{}, false, fmt.Errorf("%s: <%s>: %w", file, props[0].name, err)
+		return semver.Version{}, fmt.Errorf("%s: <%s>: %w", file, props[0].name, err)
 	}
-	return v, true, nil
+	return v, nil
 }
 
 // PackageName follows MSBuild's defaults: PackageId, else AssemblyName, else
@@ -212,7 +222,7 @@ func (n *nugetManager) SetVersion(dir string, v semver.Version) error {
 	if err := os.WriteFile(p.path, []byte(edited), 0o644); err != nil {
 		return err
 	}
-	if err := n.confirm(dir, p.path, v.String()); err != nil {
+	if _, err := n.confirm(dir, p.path, v.String()); err != nil {
 		if restoreErr := os.WriteFile(p.path, []byte(p.content), 0o644); restoreErr != nil {
 			return errors.Join(err, fmt.Errorf("cannot restore %s: %w", filepath.ToSlash(p.path), restoreErr))
 		}
@@ -221,23 +231,47 @@ func (n *nugetManager) SetVersion(dir string, v semver.Version) error {
 	return nil
 }
 
-// confirm checks that MSBuild evaluates the project at want under the pack
-// configuration. PackageVersion is asked for because it is what reaches the
-// package; it defaults to Version.
-func (n *nugetManager) confirm(dir, path, want string) error {
-	out, err := n.r.Run(dir, "dotnet", "msbuild", path,
-		"-p:Configuration="+packConfiguration, "-getProperty:PackageVersion")
+// evaluated is what MSBuild reports for a project under the pack
+// configuration.
+type evaluated struct {
+	PackageVersion string
+	IsPackable     string
+}
+
+// evaluate asks MSBuild for the properties pack reads. PackageVersion is what
+// reaches the package; it defaults to Version. Asking for two properties makes
+// -getProperty print a JSON object, decoded from its first "{" so a warning
+// the SDK prints ahead of it is skipped.
+func (n *nugetManager) evaluate(dir, path string) (evaluated, error) {
+	out, err := n.r.Run(dir, "dotnet", "msbuild", path, "-p:Configuration="+packConfiguration,
+		"-getProperty:PackageVersion", "-getProperty:IsPackable")
 	if err != nil {
-		return fmt.Errorf("dotnet msbuild: %w", err)
+		return evaluated{}, fmt.Errorf("dotnet msbuild: %w", err)
 	}
-	got := lastLine(out)
-	if got != want {
-		return fmt.Errorf("%s: MSBuild evaluates PackageVersion as %q, but the project file says %q — "+
-			"something outside the project file sets the version (a Directory.Build.props or .targets, a "+
-			"custom SDK, or an environment variable); releasing would tag one version and publish another",
-			filepath.ToSlash(path), got, want)
+	var doc struct{ Properties evaluated }
+	start := strings.Index(out, "{")
+	if start < 0 {
+		return evaluated{}, fmt.Errorf("dotnet msbuild printed no properties: %s", strings.TrimSpace(out))
 	}
-	return nil
+	if err := json.NewDecoder(strings.NewReader(out[start:])).Decode(&doc); err != nil {
+		return evaluated{}, fmt.Errorf("dotnet msbuild printed unreadable properties: %w", err)
+	}
+	return doc.Properties, nil
+}
+
+// confirm checks that MSBuild evaluates the project at want.
+func (n *nugetManager) confirm(dir, path, want string) (evaluated, error) {
+	ev, err := n.evaluate(dir, path)
+	if err != nil {
+		return ev, err
+	}
+	if ev.PackageVersion != want {
+		return ev, fmt.Errorf("%s: MSBuild evaluates PackageVersion as %q, but the project file says %q — "+
+			"something imported after the project file sets the version (a Directory.Build.targets, a custom "+
+			"SDK, or a package's build targets); releasing would tag one version and publish another",
+			filepath.ToSlash(path), ev.PackageVersion, want)
+	}
+	return ev, nil
 }
 
 func (n *nugetManager) CheckVersion(string, semver.Version) error { return nil }
@@ -246,25 +280,48 @@ func (n *nugetManager) CheckVersion(string, semver.Version) error { return nil }
 // resolved, never the project's own version, and gala rewrites no references.
 func (n *nugetManager) RefreshLock(string, string) ([]string, error) { return nil, nil }
 
-// Preflight confirms the project file's version is the one MSBuild evaluates,
-// so an override is caught by --dry-run and before any write.
-func (n *nugetManager) Preflight(dir string, _ bool) error {
+// Preflight confirms MSBuild evaluates the project at the version its project
+// file declares, so --dry-run catches an override that disagrees with it. An
+// override that happens to equal the current version shows only once the new
+// one is written, so SetVersion checks again, still before the tag.
+//
+// With publishing on, it also refuses what would otherwise fail only after the
+// tag is pushed: a project MSBuild will not pack, and a repository with no
+// push source for `dotnet nuget push` to use.
+func (n *nugetManager) Preflight(dir string, publish bool) error {
 	p, err := n.read(dir)
 	if err != nil {
 		return err
 	}
-	v, _, err := n.ManifestVersion(dir)
+	v, err := p.version()
 	if err != nil {
 		return err
 	}
-	return n.confirm(dir, p.path, v.String())
+	ev, err := n.confirm(dir, p.path, v.String())
+	if err != nil || !publish {
+		return err
+	}
+	if strings.EqualFold(ev.IsPackable, "false") {
+		return fmt.Errorf("%s: IsPackable is false, so dotnet pack would produce no package; "+
+			"set publish = false or make the project packable", filepath.ToSlash(p.path))
+	}
+	if _, err := n.r.Run(dir, "dotnet", "nuget", "config", "get", "defaultPushSource"); err != nil {
+		return fmt.Errorf("no NuGet push source — `dotnet nuget push` publishes to defaultPushSource, so add "+
+			"<add key=\"defaultPushSource\" value=\"<feed>\" /> under <config> in NuGet.config: %w", err)
+	}
+	return nil
 }
 
 // Publish packs into a temporary directory, so the push uploads exactly what
-// this release built, then pushes each package. The feed and its credentials
-// come from the repository's NuGet.config (defaultPushSource), the way npm's
-// registry comes from .npmrc. --skip-duplicate makes a re-run after a partial
-// push a no-op rather than a 409.
+// this release built, then pushes each package. The feed comes from
+// defaultPushSource in NuGet.config, the way npm's registry comes from .npmrc.
+// --skip-duplicate makes a re-run after a partial push a no-op rather than a
+// 409.
+//
+// Every package must carry the released version before anything is pushed:
+// a versioning package (MinVer, Nerdbank.GitVersioning) or a target that sets
+// Version during the build is invisible to the evaluation the earlier checks
+// run, and a feed never lets a published version be replaced.
 func (n *nugetManager) Publish(dir string) error {
 	proj, err := projectFile(dir)
 	if err != nil {
@@ -285,6 +342,13 @@ func (n *nugetManager) Publish(dir string) error {
 	}
 	if len(pkgs) == 0 {
 		return fmt.Errorf("dotnet pack produced no .nupkg for %s — check <IsPackable>", filepath.ToSlash(proj))
+	}
+	v, _, err := n.ManifestVersion(dir)
+	if err != nil {
+		return err
+	}
+	if err := checkPackedVersion(pkgs, v); err != nil {
+		return err
 	}
 	for _, pkg := range pkgs {
 		if _, err := n.r.Run(dir, "dotnet", "nuget", "push", pkg, "--skip-duplicate"); err != nil {
@@ -322,11 +386,20 @@ func (n *nugetManager) Recovery(dir, root string) string {
 		"dotnet nuget push \"nupkg/*.nupkg\" --skip-duplicate", rel(dir, root), proj, packConfiguration)
 }
 
-// lastLine is the last non-empty line of a command's output: the value
-// `-getProperty` prints, after anything the SDK wrote first.
-func lastLine(out string) string {
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	return strings.TrimSpace(lines[len(lines)-1])
+// checkPackedVersion refuses packages whose file name does not end in the
+// released version. NuGet names a package <id>.<version>.nupkg, without build
+// metadata; the comparison ignores case, as NuGet does.
+func checkPackedVersion(pkgs []string, v semver.Version) error {
+	v.Build = ""
+	suffix := "." + strings.ToLower(v.String()) + ".nupkg"
+	for _, pkg := range pkgs {
+		if name := filepath.Base(pkg); !strings.HasSuffix(strings.ToLower(name), suffix) {
+			return fmt.Errorf("dotnet pack produced %s, but the release is %s — something sets the version "+
+				"during the build (a versioning package such as MinVer or Nerdbank.GitVersioning, or a target "+
+				"that assigns Version); nothing was pushed", name, v)
+		}
+	}
+	return nil
 }
 
 // xmlProp is one MSBuild property declaration: its element name, the byte
