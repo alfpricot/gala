@@ -1,0 +1,22 @@
+{
+  "name": "@alfpricot/gala-win32-arm64",
+  "version": "0.0.0-development",
+  "description": "gala prebuilt binary for Windows arm64",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alfpricot/gala.git"
+  },
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin/gala.exe"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}

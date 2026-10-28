@@ -1,0 +1,22 @@
+{
+  "name": "@alfpricot/gala-darwin-arm64",
+  "version": "0.0.0-development",
+  "description": "gala prebuilt binary for macOS arm64",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alfpricot/gala.git"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin/gala"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}

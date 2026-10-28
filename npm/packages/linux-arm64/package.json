@@ -1,0 +1,22 @@
+{
+  "name": "@alfpricot/gala-linux-arm64",
+  "version": "0.0.0-development",
+  "description": "gala prebuilt binary for Linux arm64",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alfpricot/gala.git"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin/gala"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}
