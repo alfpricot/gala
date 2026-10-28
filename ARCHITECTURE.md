@@ -65,6 +65,7 @@ The main path: `cmd/gala` → `release.Run` → read git history and tags → pl
 - Release commits carry a skip-ci marker in the body, which stops `release.yml` from re-waking itself.
 - Stable-tag selection is reachable-only (`git tag --merged HEAD`) and ignores prerelease tags on purpose.
 - Version writes to TOML are section-and-key line edits and never go through a marshaller, guarded by a commented fixture test.
+- Version writes to .NET project files replace only the `<Version>` and `<PackageVersion>` values, located by byte offset, and never re-serialize the XML. The version MSBuild evaluates is checked before and after the write, and every packed `.nupkg` is checked against the released version before anything is pushed.
 - Lockfiles are refreshed through their owning tool (`npm install --package-lock-only`, `cargo update --workspace`, `uv lock`), never edited by hand.
 - Changed-file scoping for a monorepo uses one batched `git log --name-only` over the union range plus one rev-list per package, with no per-commit spawn.
 - The push is atomic (branch and tags together or not at all), and the `syncBranch` push is never forced.

@@ -25,7 +25,7 @@ Plain semver arithmetic, no 0.x special-casing: `0.7.0` + major = `1.0.0`.
 
 1. Read-only checks: working tree clean; current branch in `releaseBranches`; manifest/tag consistency.
 2. Build the plan (per package: tags, commits, bump, next version, rendered entry). Nothing due → print why, exit 0. For `manager = "go"`, the module path must carry `/vN` once the next major is ≥ 2.
-3. Live preflight (skipped by `plan`, run by `release` and `--dry-run`): manager binaries on PATH, `npm whoami` when npm publishing is on, and the remote branch has not moved past local `HEAD`.
+3. Live preflight (skipped by `plan`, run by `release` and `--dry-run`): manager binaries on PATH; `npm whoami` when npm publishing is on; for nuget, the version MSBuild evaluates (always), plus packability and a `defaultPushSource` when publishing is on; and the remote branch has not moved past local `HEAD`.
 4. Write: manifest bumps, lockfile refreshes (through each lockfile's owning tool), the changelog entry.
 5. Stage exactly what changed — anything else dirty is an error, not a silent extra stage.
 6. Commit `chore(release): v1.2.0` (`chore(release): N packages` for a monorepo) with the skip-ci marker in the body.
