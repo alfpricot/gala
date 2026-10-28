@@ -44,7 +44,7 @@ Invariants: every check that can run before step 4 does; all of git completes be
 gala ships two workflows:
 
 - **verify.yml** — `pull_request` (+ manual dispatch). The full gate, ending with a self-plan. Local `just check` covers pushes.
-- **release.yml** — `push` to `main` (+ manual dispatch). Runs `gala release` with `GITHUB_TOKEN`. gala releases itself: `kind = "app"`, `manager = "go"`, `publish = false`, `syncBranch = "dev"`, so a release is changelog + tag + push + `dev` fast-forward + GitHub Release with no registry step. Pushes made with `GITHUB_TOKEN` do not trigger further workflow runs, so the release commit and the `dev` sync cannot loop.
+- **release.yml** — `push` to `main` (+ manual dispatch). Runs `gala release`, pushing over the `RELEASE_DEPLOY_KEY` deploy key and creating the GitHub Release with `GITHUB_TOKEN`. gala releases itself: `kind = "app"`, `manager = "go"`, `publish = false`, `syncBranch = "dev"`, so a release is changelog + tag + push + `dev` fast-forward + GitHub Release with no registry step. Deploy-key pushes do trigger workflows; the skip-ci marker in the release commit body is what keeps the release commit from re-running `release.yml`, and no workflow runs on a tag push or a push to `dev`.
 
 A promotion that releases nothing still leaves `dev` one merge commit behind `main` — harmless (no tag moved) and corrected on the next release.
 
@@ -58,7 +58,7 @@ A promotion that releases nothing still leaves `dev` one merge commit behind `ma
 | go | — | the tag *is* the publish |
 | GitHub Release | `GITHUB_TOKEN` or `GH_TOKEN` | absent token = warn and skip, never fail after tags are pushed |
 
-If you later add a branch-protection ruleset on `main` or `dev`, the release and sync pushes will need a bypass for the `GITHUB_TOKEN` (or your release identity), or the push in step 8 will be rejected.
+This repository's rulesets block direct pushes to `main` and `dev` and the creation of `v*` tags, so the release and sync pushes need a bypass actor or the push in step 8 is rejected. On a personal-account repository GitHub Actions cannot be a bypass actor, so the rulesets exempt deploy keys instead: `release.yml` checks out with the write-access deploy key whose private half is the `RELEASE_DEPLOY_KEY` secret. If that secret is removed or the key loses write access, the atomic push in step 8 fails after the local commit and tag are written, and nothing reaches the remote.
 
 ## Recovering from a partial release
 
