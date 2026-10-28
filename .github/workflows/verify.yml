@@ -2,7 +2,8 @@
 #
 # The full gate on every pull request: formatting, vet, module tidiness,
 # staticcheck, errcheck, govulncheck, race-enabled tests, a build, and finally
-# gala planning its own next release (the self-hosting smoke test).
+# gala planning its own next release (the self-hosting check), and the npm
+# package manifest checks.
 # Target: under 5 minutes.
 
 name: verify
@@ -60,3 +61,8 @@ jobs:
 
       - name: self-plan (gala plans its own next release)
         run: go run ./cmd/gala plan
+
+      - name: npm package manifests
+        # The runner image ships Node, so this needs no setup step.
+        working-directory: npm
+        run: node --test

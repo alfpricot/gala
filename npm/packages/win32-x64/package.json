@@ -1,0 +1,22 @@
+{
+  "name": "@alfpricot/gala-win32-x64",
+  "version": "0.0.0-development",
+  "description": "gala prebuilt binary for Windows x64",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alfpricot/gala.git"
+  },
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/gala.exe"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}

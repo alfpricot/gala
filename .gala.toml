@@ -5,6 +5,7 @@ kind = "app"
 manager = "go"
 
 # Registry pushes are opt-in; gala does not publish to a package registry.
+# release.yml then publishes the latest release tag as @alfpricot/gala npm packages.
 publish = false
 
 # One GitHub Release per released tag; needs GITHUB_TOKEN or GH_TOKEN.

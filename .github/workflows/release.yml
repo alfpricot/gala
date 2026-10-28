@@ -3,10 +3,27 @@
 # A promotion that lands on main cuts the release: plan, write the changelog,
 # bump, commit (skip-ci marker in the body), annotate, push atomically,
 # fast-forward dev, and create the GitHub Release. publish = false in
-# gala.toml, so there is no registry step.
+# .gala.toml, so gala itself has no registry step; the steps after it publish
+# the latest release tag to GitHub Packages as npm packages:
+# one @alfpricot/gala-<os>-<arch> package per entry in npm/platforms.json, each
+# holding that platform's prebuilt binary and limited to it by os/cpu, and the
+# @alfpricot/gala wrapper, which lists them all as optionalDependencies so npm
+# installs only the one matching the consumer's machine. Go cross-compiles, so
+# every binary comes from this one Linux runner.
 #
-# Pushes made with GITHUB_TOKEN do not trigger further workflow runs, so the
-# release commit and the dev sync cannot loop back into this workflow.
+# Every run checks the latest release tag reachable from HEAD, not only a tag
+# on HEAD itself, and publishes whatever of that version is still missing,
+# built from the tag's own source. So a publish that fails after the tag is
+# pushed is finished by the next run on main: a dispatch, or the next
+# promotion if it releases nothing. Dispatch rather than re-running the failed
+# job, which replays the original push and stops at gala's remote check.
+#
+# The pushes go over the RELEASE_DEPLOY_KEY deploy key: the repository's
+# rulesets block direct pushes to main and dev and creating v* tags, and on a
+# personal-account repository a deploy key is the bypass actor available to a
+# workflow (GitHub Actions itself can only be one inside an organization).
+# Deploy-key pushes do trigger workflows, so the skip-ci marker in the release
+# commit body is what keeps the release commit from re-running this workflow.
 
 name: release
 
@@ -24,10 +41,12 @@ permissions:
 
 jobs:
   release:
-    # Job-level elevation: commit, tag, push the dev sync, and create the
-    # GitHub Release all need write access to the repository.
+    # Job-level elevation: creating the GitHub Release through GITHUB_TOKEN
+    # needs write access (the git pushes authenticate with the deploy key),
+    # and publishing to GitHub Packages needs packages: write.
     permissions:
       contents: write
+      packages: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -35,6 +54,9 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          # origin becomes an SSH remote authenticated by the deploy key, so
+          # gala's atomic push and dev sync use the ruleset bypass.
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -53,3 +75,52 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: go run ./cmd/gala release
+
+      - name: Find the latest release tag
+        id: tag
+        # The tag this run just made, or the newest earlier one when nothing
+        # was due; empty only in a repository with no release tag yet.
+        run: echo "tag=$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD 2>/dev/null || true)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node (GitHub Packages registry)
+        if: steps.tag.outputs.tag != ''
+        uses: actions/setup-node@v5
+        with:
+          node-version: lts/*
+          registry-url: https://npm.pkg.github.com
+          scope: "@alfpricot"
+
+      - name: Publish the npm packages
+        # Platform packages first, the wrapper last, so the wrapper is never
+        # visible while a dependency it names is missing; a published wrapper
+        # therefore means the whole version is out, and the step stops there.
+        # Otherwise it builds from the tag (HEAD may have moved past it) and
+        # skips each package already in the registry, so a run after a partial
+        # failure picks up where the last one stopped.
+        if: steps.tag.outputs.tag != ''
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -eu
+          version="${TAG#v}"
+          if [ -n "$(npm view "@alfpricot/gala@$version" version 2>/dev/null)" ]; then
+            echo "@alfpricot/gala@$version is already published; nothing to do"
+            exit 0
+          fi
+          src="$RUNNER_TEMP/release-src"
+          git worktree add --detach "$src" "$TAG"
+          if [ ! -f "$src/npm/platforms.json" ]; then
+            echo "$TAG predates the npm packages; nothing to publish"
+            exit 0
+          fi
+          out="$RUNNER_TEMP/npm-package"
+          (cd "$src" && sh npm/build.sh "$version" "$out")
+          for dir in "$out"/packages/* "$out"; do
+            name="$(node -p "require('$dir/package.json').name")"
+            if [ -n "$(npm view "$name@$version" version 2>/dev/null)" ]; then
+              echo "$name@$version is already published; skipping"
+            else
+              (cd "$dir" && npm publish)
+            fi
+          done

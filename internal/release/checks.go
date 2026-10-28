@@ -54,7 +54,8 @@ func (e *Engine) preflight(plan *Plan, publish bool) error {
 	}
 
 	// Ecosystem preflights: npm verifies the registry login when publishing
-	// is on, so a bad login fails before the tag exists.
+	// is on, and nuget the evaluated version, packability, and push source,
+	// so each fails before the tag exists.
 	for _, pkg := range plan.Due() {
 		if err := e.mgr.Preflight(pkg.AbsDir, publish); err != nil {
 			return fmt.Errorf("package %q: %w", pkg.Name, err)

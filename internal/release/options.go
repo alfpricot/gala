@@ -40,7 +40,7 @@ const (
 type Options struct {
 	// Cwd is the checkout to run against (the --cwd hook).
 	Cwd string
-	// ConfigPath overrides gala.toml discovery.
+	// ConfigPath overrides config discovery.
 	ConfigPath string
 	// NoPublish turns publish = true off for this run.
 	NoPublish bool

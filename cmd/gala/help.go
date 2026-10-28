@@ -10,12 +10,12 @@ usage:
   gala help                print this help
 
 flags:
-  --config <path>   config file to use instead of gala.toml at the repo root
+  --config <path>   config file to use instead of discovery at the repo root
   --cwd <dir>       run against another checkout
   --dry-run         preflights only, no writes (release)
   --no-publish      turn publish = true off for this run (release)
 
-config (gala.toml):
+config (gala.toml or .gala.toml at the repo root):
   kind, manager, publish, githubRelease, releaseBranches, syncBranch,
   tagPrefix, changelog, remote, and [[package]] entries for a monorepo.
 
