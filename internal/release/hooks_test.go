@@ -27,6 +27,26 @@ func TestBatchArgError(t *testing.T) {
 	}
 }
 
+func TestStartableOnWindows(t *testing.T) {
+	for _, program := range []string{`C:\r\scripts\gen.ps1`, `C:\r\scripts\gen.sh`, `C:\r\scripts\gen.py`} {
+		err := startableOnWindows("windows", program, "")
+		if err == nil || !strings.Contains(err.Error(), "cannot be started directly") {
+			t.Errorf("%s must be refused on Windows: %v", program, err)
+		}
+	}
+	for _, program := range []string{`C:\r\scripts\gen.cmd`, `C:\r\scripts\gen.EXE`, `C:\r\scripts\gen.bat`} {
+		if err := startableOnWindows("windows", program, ".COM;.EXE;.BAT;.CMD"); err != nil {
+			t.Errorf("%s starts directly: %v", program, err)
+		}
+	}
+	if err := startableOnWindows("windows", `C:\r\gen.ps1`, ".COM;.EXE;.PS1"); err != nil {
+		t.Errorf("an extension the user added to PATHEXT is accepted: %v", err)
+	}
+	if err := startableOnWindows("linux", "/r/scripts/gen.sh", ""); err != nil {
+		t.Errorf("only Windows restricts extensions: %v", err)
+	}
+}
+
 // TestCheckHookPathsResolvesLikeExec covers path-named hooks: on Windows
 // ./scripts/build finds build.cmd through PATHEXT, and elsewhere the script
 // must be executable, matching what os/exec does when the hook runs.

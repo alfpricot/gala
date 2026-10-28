@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -130,11 +131,37 @@ func (e *Engine) hookTools(due []*PackagePlan) (onPath []string, byPath []string
 // build.cmd), and elsewhere it requires the executable bit.
 func checkHookPaths(byPath []string) error {
 	for _, p := range byPath {
-		if _, err := exec.LookPath(p); err != nil {
+		resolved, err := exec.LookPath(p)
+		if err != nil {
 			return fmt.Errorf("hook command %s was not found or is not executable: %w", p, err)
+		}
+		if err := startableOnWindows(runtime.GOOS, resolved, os.Getenv("PATHEXT")); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// startableOnWindows refuses a path-named hook whose extension Windows cannot
+// start directly. LookPath accepts any existing file that has an extension,
+// but CreateProcess runs only executables and batch files, so a ./gen.ps1 or
+// ./gen.sh would pass the preflight and then fail after the version writes.
+func startableOnWindows(goos, program, pathext string) error {
+	if goos != "windows" {
+		return nil
+	}
+	if pathext == "" {
+		pathext = ".COM;.EXE;.BAT;.CMD"
+	}
+	ext := strings.ToLower(filepath.Ext(program))
+	for _, e := range strings.Split(strings.ToLower(pathext), ";") {
+		if e != "" && e == ext {
+			return nil
+		}
+	}
+	return fmt.Errorf("hook command %s cannot be started directly on Windows (%s is not in PATHEXT) — "+
+		"name its interpreter as the program instead, such as `pwsh -File %s`",
+		program, ext, filepath.ToSlash(program))
 }
 
 // checkBatchArgs refuses hook arguments that cmd.exe would interpret. On
@@ -143,6 +170,11 @@ func checkHookPaths(byPath []string) error {
 // treats & | < > ^ as operators, so the "nothing is expanded" promise only
 // holds if such arguments never reach it.
 func (e *Engine) checkBatchArgs(due []*PackagePlan) error {
+	// Elsewhere a .cmd or .bat file is an ordinary executable that receives
+	// its arguments unchanged.
+	if runtime.GOOS != "windows" {
+		return nil
+	}
 	for _, s := range e.scopes(due) {
 		for _, cmd := range slices.Concat(s.hooks.PreRelease, s.hooks.PostBump) {
 			program := cmd.Argv[0]
@@ -177,7 +209,8 @@ func batchArgError(program string, args []string) error {
 	for _, a := range args {
 		if strings.ContainsAny(a, batchUnsafe) {
 			return fmt.Errorf("argument %q would be interpreted by cmd.exe, because %s is a batch file — "+
-				"move the command into a script (an npm script, a .ps1 or .exe tool) so gala passes no such characters",
+				"move that argument into a package script (`npm run …`) or a checked-in script, or name an "+
+				"interpreter that is an .exe as the program, such as `pwsh -File script.ps1`",
 				a, filepath.Base(program))
 		}
 	}

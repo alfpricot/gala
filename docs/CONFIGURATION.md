@@ -129,7 +129,7 @@ pattern = '^(\S+)'
 
 Commands run directly, not through a shell: words split on spaces, quotes group a word with spaces in it, and nothing is expanded. Use a package script (`npm run …`, `make …`, `just …`) or a checked-in script for anything that needs a pipe, `cd`, or a variable. The preflight resolves each command's program the way the run will: a bare name on `PATH`, or a path like `./tools/gen.sh` relative to where the command runs, which on Windows also tries the `PATHEXT` extensions (`./scripts/build` finds `build.cmd`) and elsewhere must be executable.
 
-On Windows, a program that resolves to a `.cmd` or `.bat` file (`npm`, `npx`, and `pnpm` are batch shims) runs through `cmd.exe`, which would expand `%VAR%` and treat `&`, `|`, `<`, `>`, and `^` as operators. To keep the promise that nothing is expanded, the preflight refuses such a command when an argument contains any of those characters or a double quote; move that logic into a package script or a checked-in script.
+On Windows, a program that resolves to a `.cmd` or `.bat` file (`npm`, `npx`, and `pnpm` are batch shims) runs through `cmd.exe`, which would expand `%VAR%` and treat `&`, `|`, `<`, `>`, and `^` as operators. To keep the promise that nothing is expanded, the preflight refuses such a command when an argument contains any of those characters or a double quote; move that logic into a package script or a checked-in script. Windows also starts only files whose extension is in `PATHEXT` (`.exe`, `.cmd`, `.bat`), so the preflight refuses a path-named `./gen.ps1` or `./gen.sh` there; name the interpreter as the program instead, such as `pwsh -File ./gen.ps1`. Neither rule applies on Linux or macOS.
 
 ```toml
 preRelease = ["make check"]
