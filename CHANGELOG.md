@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 (2026-10-29)
+
+### Bug Fixes
+
+* **release:** refuse a release whose changelog is gitignored (#20)
+
 ## 0.3.0 (2026-10-29)
 
 ### Features
