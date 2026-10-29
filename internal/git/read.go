@@ -3,6 +3,7 @@ package git
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -53,6 +54,55 @@ func (g *Repo) Status() ([]string, error) {
 		}
 	}
 	return paths, nil
+}
+
+// ruleRE captures the pattern of a check-ignore -v rule, source:line:pattern.
+var ruleRE = regexp.MustCompile(`^.*:\d+:(.*)$`)
+
+// Ignore is one path an exclude rule hides from git, with the rule that
+// matched it as source:line:pattern.
+type Ignore struct {
+	Path string
+	Rule string
+}
+
+// Ignored reports which of paths git would ignore if they were untracked
+// files. A tracked path is never reported: git keeps showing its changes
+// whatever the ignore rules say.
+func (g *Repo) Ignored(paths ...string) ([]Ignore, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	// -z needs --stdin, which Runner does not feed, so read the plain -v form:
+	// source:line:pattern, a tab, then the path. core.quotePath=false keeps a
+	// non-ASCII path as given instead of octal-escaped in quotes.
+	args := append([]string{"-c", "core.quotePath=false", "check-ignore", "-v", "--"}, paths...)
+	out, err := g.Run(args...)
+	if err != nil {
+		// Exit 1 means no path is ignored, whatever git wrote to stderr: a
+		// warning about an unreadable excludes file or GIT_TRACE output
+		// comes with it. A real failure exits 128.
+		var ce *CommandError
+		if errors.As(err, &ce) && ce.Code == 1 {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var ignored []Ignore
+	for _, l := range strings.Split(out, "\n") {
+		rule, path, ok := strings.Cut(strings.TrimSuffix(l, "\r"), "\t")
+		if !ok {
+			continue
+		}
+		// The source can be a Windows path with a drive colon, so the
+		// line number is found from the right. A negated pattern is the
+		// last match for a path it re-includes, so that path is not ignored.
+		if m := ruleRE.FindStringSubmatch(rule); m != nil && strings.HasPrefix(m[1], "!") {
+			continue
+		}
+		ignored = append(ignored, Ignore{Path: path, Rule: rule})
+	}
+	return ignored, nil
 }
 
 // CurrentBranch returns the checked-out branch name. It returns ErrDetached

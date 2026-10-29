@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -65,6 +66,9 @@ func (e *Engine) preflight(plan *Plan, allowPublish bool) error {
 	if err := e.checkBatchArgs(plan.Due()); err != nil {
 		return err
 	}
+	if err := e.checkIgnored(plan.Due()); err != nil {
+		return err
+	}
 
 	// Ecosystem preflights: npm verifies the registry login when publishing
 	// is on, and nuget the evaluated version, packability, and push source,
@@ -89,6 +93,41 @@ func (e *Engine) preflight(plan *Plan, allowPublish bool) error {
 	// Last, the configured preRelease checks: the slowest, so they run only
 	// once everything cheaper has passed.
 	return e.preRelease(plan.Due())
+}
+
+// checkIgnored refuses a release whose changelog, manifest, or version file is
+// gitignored: staging takes what git status reports, and git status never
+// reports an ignored file, so the release commit would silently leave it out.
+// Lockfiles are not checked; an ignored lockfile (a library's Cargo.lock) is
+// meant to stay out of the commit.
+func (e *Engine) checkIgnored(due []*PackagePlan) error {
+	paths := []string{filepath.ToSlash(e.cfg.Changelog)}
+	for _, pkg := range due {
+		if m := pkg.Manager.Manifest(pkg.AbsDir, e.root); m != "" {
+			paths = append(paths, m)
+		}
+		for _, vf := range pkg.Files {
+			paths = append(paths, vf.Path)
+		}
+	}
+	ignored, err := e.repo.Ignored(paths...)
+	if err != nil {
+		return fmt.Errorf("cannot check .gitignore rules: %w", err)
+	}
+	if len(ignored) == 0 {
+		return nil
+	}
+	lines := make([]string, len(ignored))
+	for i, ig := range ignored {
+		lines[i] = fmt.Sprintf("%s (ignored by %s)", ig.Path, ig.Rule)
+	}
+	// A negation such as !/CHANGELOG.md only helps when the rule matches the
+	// file itself in the same or a higher-level ignore file; it cannot
+	// re-include a file under an ignored directory, so the hint points at the
+	// rule instead.
+	return fmt.Errorf("the release commit would leave out files gala writes, because git ignores them — "+
+		"remove or narrow each matching rule (source:line:pattern below) so the file is no longer ignored:\n  %s",
+		strings.Join(lines, "\n  "))
 }
 
 func (e *Engine) checkRemote() error {
