@@ -18,7 +18,7 @@ The entry point. It parses flags and the `plan`, `release`, `version`, and `help
 
 ### [internal/release](internal/release)
 
-Builds the plan and runs the steps: read-only checks, the per-package plan, live preflights, writes, commit, tag, atomic push, branch sync, GitHub Release, and publish. `plan.go` computes bumps and entries, `checks.go` has the checks that run before any write, `exec.go` does the writes and pushes, and `format.go` renders the plan output.
+Builds the plan and runs the steps: read-only checks, the per-package plan, live preflights, writes, commit, tag, atomic push, branch sync, GitHub Release, and publish. `plan.go` computes bumps and entries, `checks.go` has the checks that run before any write, `exec.go` does the writes and pushes, `hooks.go` runs the `preRelease` and `postBump` commands, checks the version files, and writes the workflow outputs, and `format.go` renders the plan output.
 
 ### [internal/config](internal/config)
 
@@ -38,7 +38,7 @@ Wraps the `git` command line behind an injectable runner. Reads put `--end-of-op
 
 ### [internal/manager](internal/manager)
 
-One adapter each for Go, npm, Cargo, PyPI (`uv`), and NuGet (`dotnet`). Each one reads the manifest version, writes it back, refreshes the lockfile through the tool that owns it, runs its preflight, and publishes. TOML manifests are edited line by line (`toledit.go`) and .NET project files by element value (`nuget.go`), so comments and ordering survive.
+One adapter each for Go, npm, Cargo, PyPI (`uv`), and NuGet (`dotnet`), plus `none` (`none.go`) for any other ecosystem, where tags and version files carry the version. Each one reads the manifest version, writes it back, refreshes the lockfile through the tool that owns it, runs its preflight, and publishes. TOML manifests are edited line by line (`toledit.go`), JSON version files by the byte range of one string value (`jsonedit.go`), and .NET project files by element value (`nuget.go`), so comments and ordering survive. `versionfile.go` reads and writes version files (by JSON or TOML key, or by a regular expression for any other text) and plans the lockfile refreshes for the ones that are manifests. A monorepo package can use its own adapter, so one release can drive several ecosystems.
 
 ### [internal/changelog](internal/changelog)
 

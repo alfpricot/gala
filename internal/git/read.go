@@ -28,9 +28,11 @@ const (
 
 // Status returns the paths of everything git considers changed: modified
 // tracked files, staged changes, and untracked files. It reads porcelain -z,
-// so paths are never C-quoted and need no unescaping.
+// so paths are never C-quoted and need no unescaping, and lists every
+// untracked file rather than collapsing a new directory to dir/, so a file a
+// hook creates can be matched and staged by its own path.
 func (g *Repo) Status() ([]string, error) {
-	out, err := g.Run("status", "--porcelain", "-z")
+	out, err := g.Run("status", "--porcelain", "-z", "--untracked-files=all")
 	if err != nil {
 		return nil, err
 	}

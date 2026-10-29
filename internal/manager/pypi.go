@@ -8,7 +8,7 @@ import (
 	"github.com/alfpricot/gala/internal/semver"
 )
 
-// pypiManager edits pyproject.toml [project] version with a targeted line
+// pypiManager edits pyproject.toml [project] (or [tool.poetry]) version with a targeted line
 // edit and leaves uv.lock to `uv lock`. Publishing is `uv build` + `uv
 // publish`.
 type pypiManager struct {
@@ -32,24 +32,45 @@ func (p *pypiManager) read(dir string) (string, string, error) {
 	return string(data), filepath.ToSlash(path), nil
 }
 
-// ManifestVersion reads [project] version. A pyproject without a static
+// ManifestVersion reads [project] version, or [tool.poetry] version for a
+// Poetry project that keeps its metadata there. A pyproject without a static
 // version (dynamic versioning) is a plan-time error, before any write.
 func (p *pypiManager) ManifestVersion(dir string) (semver.Version, bool, error) {
 	content, file, err := p.read(dir)
 	if err != nil {
 		return semver.Version{}, false, err
 	}
-	v, ok := GetTomlString(content, "project", "version")
+	// The poetry-dynamic-versioning plugin keeps a placeholder in
+	// [tool.poetry] version and stamps the real one at build time, so the
+	// static value is not the project's version.
+	if enabled, ok := GetTomlString(content, "tool.poetry-dynamic-versioning", "enable"); ok && enabled == "true" {
+		return semver.Version{}, false, fmt.Errorf(
+			"%s: [tool.poetry-dynamic-versioning] is enabled, so [tool.poetry] version is a placeholder — "+
+				"dynamic versioning is not supported; disable the plugin and keep a static version", file)
+	}
+	section, ok := pyprojectSection(content, "version")
 	if !ok {
 		return semver.Version{}, false, fmt.Errorf(
 			"%s: no static [project] version — dynamic versioning is not supported, "+
-				"declare version = \"...\" under [project]", file)
+				"declare version = \"...\" under [project] (or [tool.poetry])", file)
 	}
+	v, _ := GetTomlString(content, section, "version")
 	parsed, err := semver.Parse(v)
 	if err != nil {
-		return semver.Version{}, false, fmt.Errorf("%s: [project] version: %w", file, err)
+		return semver.Version{}, false, fmt.Errorf("%s: [%s] version: %w", file, section, err)
 	}
 	return parsed, true, nil
+}
+
+// pyprojectSection names the table that holds key: [project] (PEP 621) first,
+// then [tool.poetry].
+func pyprojectSection(content, key string) (string, bool) {
+	for _, section := range []string{"project", "tool.poetry"} {
+		if _, ok := GetTomlString(content, section, key); ok {
+			return section, true
+		}
+	}
+	return "", false
 }
 
 func (p *pypiManager) PackageName(dir string) (string, error) {
@@ -57,7 +78,8 @@ func (p *pypiManager) PackageName(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	name, ok := GetTomlString(content, "project", "name")
+	section, _ := pyprojectSection(content, "name")
+	name, ok := GetTomlString(content, section, "name")
 	if !ok || name == "" {
 		return "", fmt.Errorf("%s: no [project] name found", file)
 	}
@@ -69,7 +91,11 @@ func (p *pypiManager) SetVersion(dir string, v semver.Version) error {
 	if err != nil {
 		return err
 	}
-	edited, err := SetTomlValue(content, "project", "version", v.String())
+	section, ok := pyprojectSection(content, "version")
+	if !ok {
+		return fmt.Errorf("%s: no static [project] or [tool.poetry] version to write", file)
+	}
+	edited, err := SetTomlValue(content, section, "version", v.String())
 	if err != nil {
 		return fmt.Errorf("%s: %w", file, err)
 	}

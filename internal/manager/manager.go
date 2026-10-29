@@ -12,6 +12,7 @@ package manager
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -26,13 +27,28 @@ type Runner interface {
 	Run(dir, name string, args ...string) (stdout string, err error)
 }
 
+// EnvRunner is a Runner that can also add environment variables, which hook
+// commands receive (GALA_VERSION and friends). A Runner without it runs hooks
+// with the inherited environment only.
+type EnvRunner interface {
+	RunEnv(dir string, env []string, name string, args ...string) (stdout string, err error)
+}
+
 // ExecRunner is the production Runner: the real binary.
 type ExecRunner struct{}
 
 // Run executes name in dir.
-func (ExecRunner) Run(dir, name string, args ...string) (string, error) {
+func (r ExecRunner) Run(dir, name string, args ...string) (string, error) {
+	return r.RunEnv(dir, nil, name, args...)
+}
+
+// RunEnv executes name in dir with env added to the inherited environment.
+func (ExecRunner) RunEnv(dir string, env []string, name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("%s %s failed: %w: %s",
@@ -101,6 +117,8 @@ func New(name config.ManagerName, r Runner) (Manager, error) {
 		return &pypiManager{r: r}, nil
 	case config.ManagerNuGet:
 		return &nugetManager{r: r}, nil
+	case config.ManagerNone:
+		return &noneManager{}, nil
 	default:
 		return nil, fmt.Errorf("unknown manager %q", name)
 	}

@@ -38,26 +38,39 @@ func (e *Engine) checks() error {
 
 // preflight is pipeline step 3: the live checks that must pass before the
 // first local write, so a push can never be rejected after the fact. It runs
-// for `release` and `release --dry-run`, never for `plan`.
-func (e *Engine) preflight(plan *Plan, publish bool) error {
+// for `release` and `release --dry-run`, never for `plan`. allowPublish is
+// false under --no-publish; each package's own publish setting applies on top.
+func (e *Engine) preflight(plan *Plan, allowPublish bool) error {
 	// Manager binaries on PATH: the write steps shell out to them.
 	needed := map[string]bool{}
-	for range plan.Due() {
-		for _, t := range e.mgr.Tools() {
+	for _, pkg := range plan.Due() {
+		for _, t := range pkg.Manager.Tools() {
 			needed[t] = true
 		}
+	}
+	// Hook commands and the lockfile refreshes for version files need their
+	// executables too.
+	hookTools, hookPaths := e.hookTools(plan.Due())
+	for _, t := range hookTools {
+		needed[t] = true
 	}
 	for _, tool := range slices.Sorted(maps.Keys(needed)) {
 		if err := e.opts.LookPath(tool); err != nil {
 			return fmt.Errorf("%s is required for this release but was not found on PATH: %w", tool, err)
 		}
 	}
+	if err := checkHookPaths(hookPaths); err != nil {
+		return err
+	}
+	if err := e.checkBatchArgs(plan.Due()); err != nil {
+		return err
+	}
 
 	// Ecosystem preflights: npm verifies the registry login when publishing
 	// is on, and nuget the evaluated version, packability, and push source,
 	// so each fails before the tag exists.
 	for _, pkg := range plan.Due() {
-		if err := e.mgr.Preflight(pkg.AbsDir, publish); err != nil {
+		if err := pkg.Manager.Preflight(pkg.AbsDir, allowPublish && pkg.Publish); err != nil {
 			return fmt.Errorf("package %q: %w", pkg.Name, err)
 		}
 	}
@@ -72,7 +85,10 @@ func (e *Engine) preflight(plan *Plan, publish bool) error {
 	if e.cfg.GitHubRelease && e.opts.Token == "" {
 		e.opts.warnf("no GITHUB_TOKEN or GH_TOKEN in the environment — the GitHub Release step will be skipped")
 	}
-	return nil
+
+	// Last, the configured preRelease checks: the slowest, so they run only
+	// once everything cheaper has passed.
+	return e.preRelease(plan.Due())
 }
 
 func (e *Engine) checkRemote() error {

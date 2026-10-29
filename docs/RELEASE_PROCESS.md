@@ -24,10 +24,10 @@ It's plain semver arithmetic with no special treatment for 0.x: `0.7.0` plus a m
 ## The release steps
 
 1. Read-only checks: the working tree is clean, the current branch is in `releaseBranches`, and the manifest and tag agree.
-2. Build the plan. For each package that means tags, commits, bump, next version, and the rendered entry. If nothing is due, gala prints why and exits 0. For `manager = "go"`, the module path must end in `/vN` once the next major is 2 or higher.
-3. Live preflight. `plan` skips this; `release` and `--dry-run` run it. It checks that the manager binaries are on `PATH`, that `npm whoami` works when npm publishing is on, and that the remote branch hasn't moved past local `HEAD`. For nuget it always checks the version MSBuild evaluates, and when publishing is on it also checks packability and `defaultPushSource`.
-4. Write the manifest bumps, refresh the lockfiles (through each lockfile's owning tool), and write the changelog entry.
-5. Stage exactly what changed. If anything else is dirty, that's an error, and gala won't quietly stage it too.
+2. Build the plan. For each package that means tags, commits, bump, next version, and the rendered entry. If nothing is due, gala prints why and exits 0. For `manager = "go"`, the module path must end in `/vN` once the next major is 2 or higher. Every version file must already record its package's current version, or the plan fails.
+3. Live preflight. `plan` skips this; `release` and `--dry-run` run it. It checks that the manager binaries and the hook commands are on `PATH`, that `npm whoami` works when npm publishing is on, and that the remote branch hasn't moved past local `HEAD`. For nuget it always checks the version MSBuild evaluates, and when publishing is on it also checks packability and `defaultPushSource`. Last, it runs the `preRelease` commands, which must pass and leave the working tree clean.
+4. Write the manifest bumps (each package through its own manager) and the version files, refresh the lockfiles through each lockfile's owning tool (including the lockfiles of version files that are themselves manifests), write the changelog entry, then run the `postBump` commands: each released package's own, from its directory, then the top-level ones.
+5. Stage exactly what changed, plus whatever the `postBump` commands changed or created inside `postBumpPaths`. If anything else is dirty, that's an error, and gala won't quietly stage it too.
 6. Commit as `chore(release): v1.2.0` (`chore(release): N packages` for a monorepo), with the skip-ci marker in the body.
 7. Create annotated tags, with the entry's header lines as the message.
 8. Push once, atomically: `git push --atomic <remote> <branch> <tag>...`. The branch and tags land together or not at all.
@@ -75,6 +75,7 @@ This repository's rulesets block direct pushes to `main` and `dev`, and block cr
 
 gala has no resume command. Recovery is manual on purpose, and the failure message prints the exact state: which tag was pushed, which package failed, the tool's output, and the command to run.
 
+- **A `postBump` command failed.** Nothing was committed, tagged, or pushed. The working tree holds the version writes: review them with `git status`, discard them with `git restore`, fix the command, and release again.
 - **Tag pushed, publish failed.** Fix the registry problem, then run the printed command (`npm publish`, `cargo publish`, `uv publish`, or `dotnet nuget push`) in the package directory. The tag, changelog, and GitHub Release are already correct.
 - **GitHub Release failed.** The tags are pushed. Create the release by hand from the existing tag, or fix API access and run it again.
 - **Sync push rejected.** `dev` has commits the release doesn't. The warning prints the merge command, and `dev` was never force-pushed.
