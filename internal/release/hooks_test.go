@@ -104,6 +104,44 @@ func TestBatchHookArgumentsRefusedOnWindows(t *testing.T) {
 	}
 }
 
+// TestIgnoredReleaseFileRefused covers a changelog that .gitignore hides:
+// git status never reports it, so staging would leave it out of the release
+// commit without a word. A tracked version file matching the same rule is
+// fine, because git keeps reporting its changes.
+func TestIgnoredReleaseFileRefused(t *testing.T) {
+	cfg := "kind = \"app\"\nmanager = \"none\"\ngithubRelease = false\n\n" +
+		"[[versionFile]]\npath = \"VERSION.md\"\npattern = '^(\\S+)'\n"
+	r, cleanup := scaffold(t, map[string]string{
+		"gala.toml":  cfg,
+		"VERSION.md": "1.0.0\n",
+		".gitignore": "/*.md\n!/VERSION.md\n",
+	})
+	defer cleanup()
+	// VERSION.md is tracked; ignoring it now must not count against it.
+	if err := r.CommitFile(".gitignore", "/*.md\n", "chore: ignore root markdown"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CommitFile("src.txt", "x\n", "feat: a change"); err != nil {
+		t.Fatal(err)
+	}
+
+	opts, _, _ := testOptions(r, &captureRunner{})
+	err := Run(opts, ModeDryRun)
+	if err == nil || !strings.Contains(err.Error(), "CHANGELOG.md (ignored by .gitignore:1:/*.md)") {
+		t.Fatalf("an ignored changelog must fail the preflight, naming the rule: %v", err)
+	}
+	if strings.Contains(err.Error(), "VERSION.md") {
+		t.Errorf("a tracked version file is never ignored: %v", err)
+	}
+
+	if err := r.CommitFile(".gitignore", "/*.md\n!/CHANGELOG.md\n", "chore: keep the changelog"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Run(opts, ModeDryRun); err != nil {
+		t.Errorf("a re-included changelog passes: %v", err)
+	}
+}
+
 // TestReleaseFailureReportsReleasedFalse covers the "released is always
 // written" contract: a run that stops before the push, whether at config
 // load or at a preflight hook, still tells the workflow released=false.

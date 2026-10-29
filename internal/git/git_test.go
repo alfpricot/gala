@@ -224,6 +224,31 @@ func TestStatusAndBranch(t *testing.T) {
 	}
 }
 
+func TestIgnored(t *testing.T) {
+	fr, gr := newRepo(t)
+	if err := fr.CommitFile(".gitignore", "/*.md\n!/README.md\n", "chore: ignore notes"); err != nil {
+		t.Fatal(err)
+	}
+
+	// a.go is tracked, README.md is re-included, and CHANGELOG.md is ignored
+	// even though it does not exist yet.
+	got, err := gr.Ignored("a.go", "README.md", "CHANGELOG.md", "sub/c.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Path != "CHANGELOG.md" || got[0].Rule != ".gitignore:1:/*.md" {
+		t.Errorf("Ignored = %+v, want CHANGELOG.md by .gitignore:1:/*.md", got)
+	}
+
+	got, err = gr.Ignored("a.go", "README.md")
+	if err != nil || len(got) != 0 {
+		t.Errorf("nothing ignored: got %+v, %v", got, err)
+	}
+	if got, err := gr.Ignored(); err != nil || got != nil {
+		t.Errorf("no paths: got %+v, %v", got, err)
+	}
+}
+
 func TestDetachedHead(t *testing.T) {
 	fr, gr := newRepo(t)
 	sha, err := gr.HeadSHA()
