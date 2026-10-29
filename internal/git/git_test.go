@@ -247,6 +247,24 @@ func TestIgnored(t *testing.T) {
 	if got, err := gr.Ignored(); err != nil || got != nil {
 		t.Errorf("no paths: got %+v, %v", got, err)
 	}
+
+	// A non-ASCII path comes back as given, not octal-escaped in quotes.
+	got, err = gr.Ignored("versión.md")
+	if err != nil || len(got) != 1 || got[0].Path != "versión.md" {
+		t.Errorf("non-ASCII path: got %+v, %v", got, err)
+	}
+}
+
+// TestIgnoredStderrOnCleanRun covers exit 1 (nothing ignored) arriving with
+// stderr output, as it does under GIT_TRACE or when git warns that it cannot
+// read an excludes file: that is still a clean answer, not a failure.
+func TestIgnoredStderrOnCleanRun(t *testing.T) {
+	_, gr := newRepo(t)
+	t.Setenv("GIT_TRACE", "1")
+	got, err := gr.Ignored("a.go", "nothing-matches.txt")
+	if err != nil || len(got) != 0 {
+		t.Errorf("trace output on stderr must not fail the check: got %+v, %v", got, err)
+	}
 }
 
 func TestDetachedHead(t *testing.T) {

@@ -74,13 +74,16 @@ func (g *Repo) Ignored(paths ...string) ([]Ignore, error) {
 		return nil, nil
 	}
 	// -z needs --stdin, which Runner does not feed, so read the plain -v form:
-	// source:line:pattern, a tab, then the path as given.
-	args := append([]string{"check-ignore", "-v", "--"}, paths...)
+	// source:line:pattern, a tab, then the path. core.quotePath=false keeps a
+	// non-ASCII path as given instead of octal-escaped in quotes.
+	args := append([]string{"-c", "core.quotePath=false", "check-ignore", "-v", "--"}, paths...)
 	out, err := g.Run(args...)
 	if err != nil {
-		// Exit 1 means no path is ignored.
+		// Exit 1 means no path is ignored, whatever git wrote to stderr: a
+		// warning about an unreadable excludes file or GIT_TRACE output
+		// comes with it. A real failure exits 128.
 		var ce *CommandError
-		if errors.As(err, &ce) && ce.Code == 1 && strings.TrimSpace(ce.Stderr) == "" {
+		if errors.As(err, &ce) && ce.Code == 1 {
 			return nil, nil
 		}
 		return nil, err

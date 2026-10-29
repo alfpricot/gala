@@ -121,9 +121,13 @@ func (e *Engine) checkIgnored(due []*PackagePlan) error {
 	for i, ig := range ignored {
 		lines[i] = fmt.Sprintf("%s (ignored by %s)", ig.Path, ig.Rule)
 	}
+	// A negation such as !/CHANGELOG.md only helps when the rule matches the
+	// file itself in the same or a higher-level ignore file; it cannot
+	// re-include a file under an ignored directory, so the hint points at the
+	// rule instead.
 	return fmt.Errorf("the release commit would leave out files gala writes, because git ignores them — "+
-		"remove the matching rule or re-include each one (for example !/%s):\n  %s",
-		ignored[0].Path, strings.Join(lines, "\n  "))
+		"remove or narrow each matching rule (source:line:pattern below) so the file is no longer ignored:\n  %s",
+		strings.Join(lines, "\n  "))
 }
 
 func (e *Engine) checkRemote() error {
