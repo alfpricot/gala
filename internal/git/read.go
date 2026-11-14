@@ -105,6 +105,34 @@ func (g *Repo) Ignored(paths ...string) ([]Ignore, error) {
 	return ignored, nil
 }
 
+// IgnoredUntracked lists the untracked files that git ignores under the given
+// pathspecs. Each pathspec is taken literally as a path or a wildcard
+// pattern, never as pathspec magic. Output is NUL-separated, because git
+// quotes a name containing a double quote, backslash, tab or newline
+// otherwise, and a quoted name would never match a postBumpPaths entry.
+func (g *Repo) IgnoredUntracked(pathspecs ...string) ([]string, error) {
+	if len(pathspecs) == 0 {
+		return nil, nil
+	}
+	args := []string{"ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--"}
+	for _, p := range pathspecs {
+		// A leading ./ keeps a path that starts with a colon from being
+		// read as pathspec magic.
+		args = append(args, "./"+p)
+	}
+	out, err := g.Run(args...)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, f := range strings.Split(out, "\x00") {
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	return files, nil
+}
+
 // CurrentBranch returns the checked-out branch name. It returns ErrDetached
 // when HEAD is not on a branch.
 func (g *Repo) CurrentBranch() (string, error) {
