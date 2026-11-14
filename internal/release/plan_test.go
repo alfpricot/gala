@@ -433,3 +433,29 @@ func TestMonorepoUnionRangeCoversEveryAnchor(t *testing.T) {
 	mustContain(t, got, "c → c/v1.1.0", "c's feature since its older tag is in range")
 	mustContain(t, got, "2 of 3 packages due", "the header counts due packages")
 }
+
+// TestPrereleaseManifestFinalizes: a manifest at a prerelease releases that
+// version when the bump does not outrank it, instead of skipping past it, and
+// git's default revert subject counts as a revert.
+func TestPrereleaseManifestFinalizes(t *testing.T) {
+	cfg := "kind = \"app\"\nmanager = \"npm\"\ngithubRelease = false\nreleaseBranches = [\"main\"]\n"
+	r, cleanup := scaffold(t, map[string]string{
+		"gala.toml":    cfg,
+		"package.json": "{\n  \"name\": \"widget\",\n  \"version\": \"1.2.0-rc.1\"\n}\n",
+	})
+	defer cleanup()
+	if err := r.CommitFile("src.txt", "x\n", "fix: a patch change"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CommitFile("src2.txt", "y\n", `Revert "feat: the flag (#12)"`); err != nil {
+		t.Fatal(err)
+	}
+
+	opts, out, _ := testOptions(r, &captureRunner{})
+	if err := Run(opts, ModePlan); err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, out.String(), "v1.2.0 (patch", "1.2.0-rc.1 with a patch bump finalizes 1.2.0")
+	mustContain(t, out.String(), "  Reverts\n", "git's default revert subject renders under Reverts")
+	mustContain(t, out.String(), "feat: the flag (#12)", "the reverted subject is the description")
+}

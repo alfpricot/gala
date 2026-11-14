@@ -14,12 +14,14 @@ The base version is the latest reachable stable tag, or the manifest's current v
 | `fix` | patch | Bug Fixes |
 | `perf` | patch | Performance |
 | `refactor` | patch | Refactoring |
-| `revert` | patch | Reverts |
+| `revert` (also git's default `Revert "<subject>"`) | patch | Reverts |
 | `!` suffix or `BREAKING CHANGE:`/`BREAKING-CHANGE:` footer | major (overrides the type) | Breaking Changes (listed first) |
 | `docs` `test` `style` `build` `ci` `chore` | none | hidden |
 | non-conforming message (includes promotion merge commits) | none | counted and reported as skipped |
 
-It's plain semver arithmetic with no special treatment for 0.x: `0.7.0` plus a major bump is `1.0.0`.
+It's plain semver arithmetic with no special treatment for 0.x: `0.7.0` plus a major bump is `1.0.0`. A manifest that is at a prerelease finalizes it when the bump does not outrank it: `1.2.0-rc.1` with a patch or minor bump releases `1.2.0`, `1.2.1-rc.1` with a patch bump releases `1.2.1`, while `1.2.1-rc.1` with a minor bump releases `1.3.0`.
+
+Commit subjects render into the changelog and the GitHub Release as written, except that an `@handle` is wrapped in a code span so it never notifies the person, and markdown characters in a scope are escaped.
 
 ## The release steps
 

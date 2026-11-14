@@ -191,3 +191,23 @@ func write(t *testing.T, path, content string) {
 		t.Fatal(err)
 	}
 }
+
+// TestMentionsAndScopesAreNeutralized: a commit subject that names a user must
+// not notify them, and a scope with markdown must not break its bold span.
+func TestMentionsAndScopesAreNeutralized(t *testing.T) {
+	cases := []struct{ subject, want string }{
+		{"fix: thanks @octocat for the report", "* thanks `@octocat` for the report"},
+		{"fix: @octocat/reviewers asked", "* `@octocat/reviewers` asked"},
+		{"fix: bump `@angular/core` to 18", "* bump `@angular/core` to 18"},
+		{"fix: mail dev@example.com about it", "* mail dev@example.com about it"},
+		{"fix: keep `code` and **bold** as written", "* keep `code` and **bold** as written"},
+		{"fix(a*b_c): scoped", "* **a\\*b\\_c:** scoped"},
+		{"fix(@octocat): scoped to a user", "* **`@octocat`:** scoped to a user"},
+	}
+	for _, tc := range cases {
+		got := Build("## 1.0.0", []commit.Commit{commit.Parse("h", tc.subject, "")})
+		if !strings.Contains(got, tc.want) {
+			t.Errorf("%q rendered as\n%s\nwant a line %q", tc.subject, got, tc.want)
+		}
+	}
+}

@@ -143,7 +143,39 @@ func TestUnquoteEdge(t *testing.T) {
 	if _, ok := GetTomlString("[project]\nversion = \"1.0.0\n", "project", "version"); ok {
 		t.Error("an unterminated string must not parse")
 	}
-	if strings.Contains("", "") == false {
-		t.Fatal("sanity")
+}
+
+// TestSingleQuotedLiteralStrings: a '...' literal string reads without its
+// quotes and without escape processing, wherever the key is read, and a write
+// replaces it with a basic string while keeping the trailing comment.
+func TestSingleQuotedLiteralStrings(t *testing.T) {
+	doc := "[project]\nname = 'gizmo'\nversion = '1.2.3' # pinned\n" +
+		"path = 'C:\\tools\\a b # not a comment' # real comment\nbroken = '1.0\n"
+	for key, want := range map[string]string{
+		"name":    "gizmo",
+		"version": "1.2.3",
+		"path":    `C:\tools\a b # not a comment`,
+	} {
+		if got, ok := GetTomlString(doc, "project", key); !ok || got != want {
+			t.Errorf("%s = %q %v, want %q", key, got, ok, want)
+		}
+	}
+	if _, ok := GetTomlString(doc, "project", "broken"); ok {
+		t.Error("an unterminated literal string must not parse")
+	}
+
+	out, err := SetTomlValue(doc, "project", "version", "1.3.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `version = "1.3.0" # pinned`) {
+		t.Errorf("the write must replace the literal and keep the comment:\n%s", out)
+	}
+	out, err = SetTomlValue(doc, "project", "path", "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `path = "x" # real comment`) {
+		t.Errorf("a literal containing # and spaces must be replaced whole:\n%s", out)
 	}
 }

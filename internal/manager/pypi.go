@@ -125,16 +125,41 @@ func (p *pypiManager) RefreshLock(dir, root string) ([]string, error) {
 
 func (p *pypiManager) Preflight(string, bool) error { return nil }
 
+// Publish builds into a fresh temporary directory and uploads exactly the
+// files that build produced: a bare `uv publish` uploads everything in dist/,
+// including wheels and sdists left by earlier builds, and an index never lets
+// a published file be replaced.
 func (p *pypiManager) Publish(dir string) error {
-	if _, err := p.r.Run(dir, "uv", "build"); err != nil {
+	out, err := os.MkdirTemp("", "gala-uv-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(out) }()
+
+	if _, err := p.r.Run(dir, "uv", "build", "--out-dir", out); err != nil {
 		return fmt.Errorf("uv build: %w", err)
 	}
-	if _, err := p.r.Run(dir, "uv", "publish"); err != nil {
+	entries, err := os.ReadDir(out)
+	if err != nil {
+		return err
+	}
+	args := []string{"publish"}
+	for _, e := range entries {
+		if !e.IsDir() {
+			args = append(args, filepath.Join(out, e.Name()))
+		}
+	}
+	if len(args) == 1 {
+		return fmt.Errorf("uv build produced no files for %s", filepath.ToSlash(dir))
+	}
+	if _, err := p.r.Run(dir, "uv", args...); err != nil {
 		return fmt.Errorf("uv publish: %w", err)
 	}
 	return nil
 }
 
 func (p *pypiManager) Recovery(dir, root string) string {
-	return fmt.Sprintf("cd %s && uv build && uv publish", rel(dir, root))
+	// A fresh output directory keeps files from earlier builds out of the
+	// upload; remove it afterwards.
+	return fmt.Sprintf("cd %s && uv build --out-dir gala-dist && uv publish gala-dist/*", rel(dir, root))
 }

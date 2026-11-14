@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/alfpricot/gala/internal/commit"
@@ -62,11 +63,38 @@ func Build(header string, commits []commit.Commit) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// bullet renders one commit: bold scope, description, then inline refs.
+// mentionRe matches an @handle (or @org/team) that GitHub would turn into a
+// mention: at the start of the text or after a character that cannot be part
+// of a word or an address, and not already inside a code span.
+var mentionRe = regexp.MustCompile("(^|[^\\w`@/.+-])@([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:/[A-Za-z0-9_.-]+)?)")
+
+// neutralizeMentions wraps each @handle in a code span, so a commit subject
+// that names a user does not notify them when the entry is rendered in a
+// changelog, a release, or an issue.
+func neutralizeMentions(text string) string {
+	return mentionRe.ReplaceAllString(text, "$1`@$2`")
+}
+
+// escapeScope backslash-escapes the markdown that would change how a scope
+// renders inside its bold span.
+func escapeScope(scope string) string {
+	var b strings.Builder
+	for _, r := range scope {
+		if strings.ContainsRune("\\*_`[]<>", r) {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// bullet renders one commit: bold scope, description, then inline refs. The
+// description keeps its own markdown (a backticked name is meant to render as
+// code) but never pings a user; the scope is escaped.
 func bullet(c commit.Commit) string {
-	line := c.Description
+	line := neutralizeMentions(c.Description)
 	if c.Scope != "" {
-		line = fmt.Sprintf("**%s:** %s", c.Scope, line)
+		line = fmt.Sprintf("**%s:** %s", neutralizeMentions(escapeScope(c.Scope)), line)
 	}
 	// Append only the refs the line does not already carry: a squash-merge
 	// subject arrives as "fix: ... (#42)", and repeating the number reads like

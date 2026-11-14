@@ -382,8 +382,11 @@ func (n *nugetManager) Recovery(dir, root string) string {
 	if p, err := projectFile(dir); err == nil {
 		proj = filepath.Base(p)
 	}
-	return fmt.Sprintf("cd %s && dotnet pack %s --configuration %s --output nupkg && "+
-		"dotnet nuget push \"nupkg/*.nupkg\" --skip-duplicate", rel(dir, root), proj, packConfiguration)
+	// A fresh output directory keeps packages left by earlier builds (older
+	// versions, a legacy .symbols.nupkg) out of the push, which is what
+	// Publish does by packing into a temporary directory; remove it afterwards.
+	return fmt.Sprintf("cd %s && dotnet pack %s --configuration %s --output gala-nupkg && "+
+		"dotnet nuget push \"gala-nupkg/*.nupkg\" --skip-duplicate", rel(dir, root), proj, packConfiguration)
 }
 
 // checkPackedVersion refuses packages whose file name does not end in the

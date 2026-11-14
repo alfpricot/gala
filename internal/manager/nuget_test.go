@@ -318,8 +318,8 @@ func TestNugetRecoveryAndLock(t *testing.T) {
 	}
 	r := &captureRunner{}
 	n, _ := New("nuget", r)
-	want := `cd src/Widget && dotnet pack Widget.csproj --configuration Release --output nupkg && ` +
-		`dotnet nuget push "nupkg/*.nupkg" --skip-duplicate`
+	want := `cd src/Widget && dotnet pack Widget.csproj --configuration Release --output gala-nupkg && ` +
+		`dotnet nuget push "gala-nupkg/*.nupkg" --skip-duplicate`
 	if got := n.Recovery(dir, root); got != want {
 		t.Errorf("Recovery = %q", got)
 	}
