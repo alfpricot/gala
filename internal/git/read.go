@@ -154,6 +154,22 @@ func (g *Repo) Tags() ([]string, error) {
 	return tags, nil
 }
 
+// HasTag reports whether the local repository has the named tag, whether or
+// not it is reachable from HEAD (Tags only lists reachable ones).
+func (g *Repo) HasTag(tag string) (bool, error) {
+	ref := "refs/tags/" + tag
+	out, err := g.Run("for-each-ref", "--format=%(refname)", ref)
+	if err != nil {
+		return false, err
+	}
+	for _, l := range strings.Split(out, "\n") {
+		if strings.TrimSuffix(l, "\r") == ref {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // Log returns the commits in the given ranges (newest first) together with
 // the files each commit touched. Ranges are passed to a single batched
 // `git log --name-only`; the caller filters paths in process rather than

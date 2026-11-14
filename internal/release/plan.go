@@ -279,14 +279,60 @@ func (e *Engine) specs() ([]spec, error) {
 
 		prefix := p.TagPrefix
 		if prefix == "" {
-			prefix = name + "/v"
+			prefix = defaultTagPrefix(p.Manager, p.Path, name)
 		}
 		specs = append(specs, spec{
 			name: name, absDir: absDir, relDir: p.Path, prefix: prefix,
 			mgr: mgr, publish: p.Publish, files: p.VersionFiles, hooks: p.Hooks,
 		})
 	}
+	if err := checkTagPrefixes(specs); err != nil {
+		return nil, err
+	}
 	return specs, nil
+}
+
+// defaultTagPrefix is the tag prefix a monorepo package gets when it sets
+// none. Go resolves a nested module's versions only from tags named
+// <subdir>/vX.Y.Z, so a go package defaults to its directory (and to plain "v"
+// for a module at the repository root); every other manager defaults to its
+// name.
+func defaultTagPrefix(mgr config.ManagerName, relDir, name string) string {
+	if mgr == config.ManagerGo {
+		if relDir == "." {
+			return "v"
+		}
+		return relDir + "/v"
+	}
+	return name + "/v"
+}
+
+// checkTagPrefixes rejects two packages whose tags could be mistaken for one
+// another. An identical prefix shares a tag namespace outright. A prefix that
+// another one extends with a digit is just as ambiguous: with "v" and "v1."
+// the tag "v1.2.0" parses as a version of the first and belongs to the second.
+func checkTagPrefixes(specs []spec) error {
+	for i, a := range specs {
+		for _, b := range specs[i+1:] {
+			if a.prefix == b.prefix {
+				return fmt.Errorf("packages %q and %q both use tag prefix %q — "+
+					"give one of them a distinct tagPrefix so their releases do not share tags",
+					a.relDir, b.relDir, a.prefix)
+			}
+			short, long := a, b
+			if len(short.prefix) > len(long.prefix) {
+				short, long = long, short
+			}
+			rest, ok := strings.CutPrefix(long.prefix, short.prefix)
+			if ok && rest != "" && rest[0] >= '0' && rest[0] <= '9' {
+				return fmt.Errorf("packages %q and %q have overlapping tag prefixes %q and %q — "+
+					"a tag of the longer one can read as a version of the shorter one; "+
+					"give them distinct tagPrefix values",
+					short.relDir, long.relDir, short.prefix, long.prefix)
+			}
+		}
+	}
+	return nil
 }
 
 // selectTag returns the highest stable tag under prefix and its version.

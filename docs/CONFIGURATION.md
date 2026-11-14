@@ -25,7 +25,7 @@ manager = "npm"          # the default for every package
 [[package]]
 path = "packages/core"   # required; name defaults to the manifest's package name
 # name = "core"          # optional override
-# tagPrefix = "core/v"   # default "<name>/v"
+# tagPrefix = "core/v"   # default "<name>/v"; "<path>/v" for manager = "go"
 
 [[package]]
 path = "packages/cli"    # declared after core because it depends on core
@@ -72,7 +72,7 @@ pattern = '__version__ = "([^"]+)"'
 | `tagPrefix` | `"v"` | app only |
 | `changelog` | `"CHANGELOG.md"` | path relative to the repo root |
 | `remote` | `"origin"` | used for the push and to work out the owner and repo |
-| `[[package]]` | none | monorepo only: `path` is required; `name`, `tagPrefix`, `manager`, `publish`, `preRelease`, `postBump`, `postBumpPaths`, and `[[package.versionFile]]` are optional; declaration order is publish order |
+| `[[package]]` | none | monorepo only: two packages may not share a `tagPrefix`, or use prefixes where one extends the other with a digit; `path` is required; `name`, `tagPrefix`, `manager`, `publish`, `preRelease`, `postBump`, `postBumpPaths`, and `[[package.versionFile]]` are optional; declaration order is publish order |
 | `[[versionFile]]` | none | app only (a monorepo package uses `[[package.versionFile]]`): more files that carry the release version; see [Extra version files](#extra-version-files) |
 | `preRelease` | `[]` | commands run after the preflights and before any write; see [Hook commands](#hook-commands) |
 | `postBump` | `[]` | commands run after the version writes and before staging |
