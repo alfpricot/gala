@@ -2,10 +2,15 @@ package release
 
 import (
 	"bytes"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/alfpricot/gala/internal/gittest"
 	"github.com/alfpricot/gala/internal/manager"
 )
 
@@ -22,6 +27,17 @@ func TestIndentWriter(t *testing.T) {
 	w.Flush()
 	if got, want := buf.String(), "> one\n> two\n> three\n"; got != want {
 		t.Errorf("indented output = %q, want %q", got, want)
+	}
+
+	// A progress bar redraws with a bare carriage return: each redraw is a
+	// line as soon as it is printed, without waiting for a newline.
+	buf.Reset()
+	w = &indentWriter{w: &buf, prefix: "> "}
+	if _, err := w.Write([]byte("10%\r50%\r")); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := buf.String(), "> 10%\n> 50%\n"; got != want {
+		t.Errorf("progress output = %q, want %q before the command exits", got, want)
 	}
 }
 
@@ -120,5 +136,94 @@ func TestPostBumpOutputThatGitIgnoresIsRefused(t *testing.T) {
 			t.Fatal(err)
 		}
 		mustContain(t, files, "dist/app.js", "the generated file joins the release commit")
+	})
+}
+
+// TestPostBumpIgnoredCheckCountsOnlyWhatTheHooksWrote covers the snapshot: an
+// ignored file that was already under a directory entry is the user's, and
+// only a file a command created or rewrote stops the release.
+func TestPostBumpIgnoredCheckCountsOnlyWhatTheHooksWrote(t *testing.T) {
+	cfg := "kind = \"app\"\nmanager = \"go\"\ngithubRelease = false\nreleaseBranches = [\"main\"]\n" +
+		"postBump = [\"gen\"]\npostBumpPaths = [\"dist\"]\n"
+	setup := func(t *testing.T) *gittest.Repo {
+		t.Helper()
+		r, cleanup := scaffold(t, map[string]string{"gala.toml": cfg, ".gitignore": "dist/\n"})
+		t.Cleanup(cleanup)
+		if err := r.CommitFile("src.txt", "x\n", "feat: a change"); err != nil {
+			t.Fatal(err)
+		}
+		// Content a CI step left behind, older than the run.
+		if err := r.WriteFile("dist/cache.bin", "old build output\n"); err != nil {
+			t.Fatal(err)
+		}
+		old := time.Now().Add(-time.Hour)
+		if err := os.Chtimes(filepath.Join(r.Dir, "dist", "cache.bin"), old, old); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	genNothing := &captureRunner{}
+
+	t.Run("pre-existing ignored files are left alone", func(t *testing.T) {
+		r := setup(t)
+		opts, out, _ := testOptions(r, genNothing)
+		if err := Run(opts, ModeRelease); err != nil {
+			t.Fatalf("ignored content that was already there must not stop the release: %v\n%s", err, out.String())
+		}
+	})
+
+	t.Run("a rewritten ignored file stops it", func(t *testing.T) {
+		r := setup(t)
+		rewrite := &captureRunner{respond: func(_, name string, _ []string) (string, error) {
+			if name == "gen" {
+				return "", r.WriteFile("dist/cache.bin", "rebuilt by the hook, longer\n")
+			}
+			return "", nil
+		}}
+		opts, _, _ := testOptions(r, rewrite)
+		err := Run(opts, ModeRelease)
+		if err == nil {
+			t.Fatal("an ignored file the hook rewrote must fail the release")
+		}
+		mustContain(t, err.Error(), "dist/cache.bin (ignored by .gitignore:1:dist/)", "the file and its rule")
+	})
+
+	t.Run("a long list is capped and named", func(t *testing.T) {
+		r := setup(t)
+		many := &captureRunner{respond: func(_, name string, _ []string) (string, error) {
+			if name == "gen" {
+				for i := 0; i < 25; i++ {
+					if err := r.WriteFile(fmt.Sprintf("dist/out-%02d.js", i), "x\n"); err != nil {
+						return "", err
+					}
+				}
+			}
+			return "", nil
+		}}
+		opts, _, _ := testOptions(r, many)
+		err := Run(opts, ModeRelease)
+		if err == nil {
+			t.Fatal("ignored hook output must fail the release")
+		}
+		mustContain(t, err.Error(), "dist/out-00.js (ignored by", "the first files are named with their rule")
+		mustContain(t, err.Error(), "and 5 more", "the rest are counted")
+		mustNotContain(t, err.Error(), "dist/out-24.js", "the list is capped")
+	})
+
+	t.Run("a name git quotes is still found", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("a double quote cannot appear in a Windows file name")
+		}
+		r := setup(t)
+		quoted := &captureRunner{respond: func(_, name string, _ []string) (string, error) {
+			if name == "gen" {
+				return "", r.WriteFile("dist/a\"b.js", "x\n")
+			}
+			return "", nil
+		}}
+		opts, _, _ := testOptions(r, quoted)
+		if err := Run(opts, ModeRelease); err == nil {
+			t.Fatal("an ignored file whose name git quotes must still fail the release")
+		}
 	})
 }

@@ -3,6 +3,7 @@ package manager
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -27,6 +28,17 @@ func TestHelperProcess(t *testing.T) {
 	case "slow":
 		fmt.Println("started")
 		time.Sleep(time.Minute)
+	case "linger":
+		// Start a child that keeps this process's output pipes open, then exit 0.
+		child := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$")
+		child.Env = append(os.Environ(), "HELPER_MODE=sleepy")
+		child.Stdout, child.Stderr = os.Stdout, os.Stderr
+		if err := child.Start(); err != nil {
+			os.Exit(4)
+		}
+		fmt.Println("parent done")
+	case "sleepy":
+		time.Sleep(3 * time.Second)
 	case "fail":
 		fmt.Println("about to fail")
 		os.Exit(3)
@@ -142,7 +154,29 @@ func TestRunHookTimeout(t *testing.T) {
 	if !strings.Contains(err.Error(), "timed out after 400ms") {
 		t.Errorf("the error must say the hook timed out: %v", err)
 	}
+	if !strings.Contains(err.Error(), "programs it started may still be running") {
+		t.Errorf("the error must say only the command's own process was stopped: %v", err)
+	}
 	if elapsed := time.Since(start); elapsed > 20*time.Second {
 		t.Errorf("the hook was not stopped promptly: %s", elapsed)
+	}
+}
+
+// TestRunHookSucceedsWhenAChildKeepsThePipeOpen: a hook that exits 0 but
+// leaves a background child holding its output pipe is a success, not a
+// failure after the pipe wait delay.
+func TestRunHookSucceedsWhenAChildKeepsThePipeOpen(t *testing.T) {
+	old := hookWaitDelay
+	hookWaitDelay = 300 * time.Millisecond
+	t.Cleanup(func() { hookWaitDelay = old })
+
+	spec := helperSpec("linger")
+	spec.Out = &timedWriter{}
+	start := time.Now()
+	if _, err := (ExecRunner{}).RunHook(spec); err != nil {
+		t.Fatalf("a hook that exited 0 must succeed even with a child holding its pipe: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2500*time.Millisecond {
+		t.Errorf("RunHook waited %s for the lingering child, want about the wait delay", elapsed)
 	}
 }

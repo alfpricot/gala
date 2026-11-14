@@ -107,12 +107,14 @@ func (g *Repo) Ignored(paths ...string) ([]Ignore, error) {
 
 // IgnoredUntracked lists the untracked files that git ignores under the given
 // pathspecs. Each pathspec is taken literally as a path or a wildcard
-// pattern, never as pathspec magic.
+// pattern, never as pathspec magic. Output is NUL-separated, because git
+// quotes a name containing a double quote, backslash, tab or newline
+// otherwise, and a quoted name would never match a postBumpPaths entry.
 func (g *Repo) IgnoredUntracked(pathspecs ...string) ([]string, error) {
 	if len(pathspecs) == 0 {
 		return nil, nil
 	}
-	args := []string{"-c", "core.quotePath=false", "ls-files", "--others", "--ignored", "--exclude-standard", "--"}
+	args := []string{"ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--"}
 	for _, p := range pathspecs {
 		// A leading ./ keeps a path that starts with a colon from being
 		// read as pathspec magic.
@@ -123,9 +125,9 @@ func (g *Repo) IgnoredUntracked(pathspecs ...string) ([]string, error) {
 		return nil, err
 	}
 	var files []string
-	for _, l := range strings.Split(out, "\n") {
-		if l = strings.TrimSuffix(l, "\r"); l != "" {
-			files = append(files, l)
+	for _, f := range strings.Split(out, "\x00") {
+		if f != "" {
+			files = append(files, f)
 		}
 	}
 	return files, nil

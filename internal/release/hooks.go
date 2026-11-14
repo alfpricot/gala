@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/alfpricot/gala/internal/config"
 	"github.com/alfpricot/gala/internal/manager"
@@ -282,7 +283,9 @@ func (e *Engine) runCommands(key string, s scope, cmds []config.Command) error {
 }
 
 // indentWriter indents every complete line it receives and skips blank ones,
-// so a hook's output reads as part of the release transcript while it runs.
+// so a hook's output reads as part of the release transcript while it runs. A
+// bare carriage return ends a line too, so a tool that redraws a progress bar
+// shows each redraw as it is printed instead of one long line at exit.
 type indentWriter struct {
 	w      io.Writer
 	prefix string
@@ -292,7 +295,7 @@ type indentWriter struct {
 func (i *indentWriter) Write(p []byte) (int, error) {
 	i.buf = append(i.buf, p...)
 	for {
-		nl := bytes.IndexByte(i.buf, '\n')
+		nl := bytes.IndexAny(i.buf, "\r\n")
 		if nl < 0 {
 			return len(p), nil
 		}
@@ -353,50 +356,107 @@ const postBumpFailure = "\n  nothing was committed, tagged, or pushed; the worki
 // postBump runs every scope's postBump commands after the version writes,
 // then refuses output that git ignores.
 func (e *Engine) postBump(scopes []scope) error {
+	// Ignored files under postBumpPaths that already exist (node_modules, a
+	// build from an earlier step) are the user's, not output of these
+	// commands, so the check compares against what was there before.
+	before, err := e.ignoredPostBumpFiles(scopes)
+	if err != nil {
+		return fmt.Errorf("%w%s", err, postBumpFailure)
+	}
 	for _, s := range scopes {
 		if err := e.runCommands("postBump", s, s.hooks.PostBump); err != nil {
 			return fmt.Errorf("%w%s", err, postBumpFailure)
 		}
 	}
-	if err := e.checkPostBumpIgnored(scopes); err != nil {
+	if err := e.checkPostBumpIgnored(scopes, before); err != nil {
 		return fmt.Errorf("%w%s", err, postBumpFailure)
 	}
 	return nil
 }
 
-// checkPostBumpIgnored refuses a postBump output that the release commit
-// would leave out: staging takes what git status reports, and git status never
-// reports an ignored file, so a file matching postBumpPaths that .gitignore
-// hides (a generated dist/ directory, typically) would be tagged without it.
-func (e *Engine) checkPostBumpIgnored(scopes []scope) error {
+// stamp is what identifies a file's content cheaply enough to tell whether a
+// command rewrote it.
+type stamp struct {
+	size int64
+	mod  time.Time
+}
+
+// ignoredPostBumpFiles lists the untracked files git ignores that match some
+// scope's postBumpPaths, with their size and modification time.
+func (e *Engine) ignoredPostBumpFiles(scopes []scope) (map[string]stamp, error) {
 	var specs []string
 	for _, s := range scopes {
 		specs = append(specs, s.hooks.PostBumpPaths...)
 	}
 	files, err := e.repo.IgnoredUntracked(specs...)
 	if err != nil {
-		return fmt.Errorf("cannot check .gitignore rules for postBump output: %w", err)
+		return nil, fmt.Errorf("cannot check .gitignore rules for postBump output: %w", err)
+	}
+	out := map[string]stamp{}
+	for _, f := range files {
+		if !allowedPostBump(scopes, f) {
+			continue
+		}
+		var st stamp
+		if info, err := os.Stat(filepath.Join(e.root, filepath.FromSlash(f))); err == nil {
+			st = stamp{size: info.Size(), mod: info.ModTime()}
+		}
+		out[f] = st
+	}
+	return out, nil
+}
+
+// maxIgnoredShown caps how many files the refusal names, and how many paths
+// go to one git check-ignore call, which an operating system limits by the
+// length of the argument list.
+const maxIgnoredShown = 20
+
+// checkPostBumpIgnored refuses a postBump output that the release commit
+// would leave out: staging takes what git status reports, and git status never
+// reports an ignored file, so a file matching postBumpPaths that .gitignore
+// hides (a generated dist/ directory, typically) would be tagged without it.
+// Only files the commands created or rewrote count; before is what existed.
+func (e *Engine) checkPostBumpIgnored(scopes []scope, before map[string]stamp) error {
+	after, err := e.ignoredPostBumpFiles(scopes)
+	if err != nil {
+		return err
 	}
 	var left []string
-	for _, f := range files {
-		if allowedPostBump(scopes, f) {
+	for f, st := range after {
+		if prev, existed := before[f]; !existed || prev.size != st.size || !prev.mod.Equal(st.mod) {
 			left = append(left, f)
 		}
 	}
 	if len(left) == 0 {
 		return nil
 	}
-	ignored, err := e.repo.Ignored(left...)
+	slices.Sort(left)
+	shown := left
+	if len(shown) > maxIgnoredShown {
+		shown = shown[:maxIgnoredShown]
+	}
+	ignored, err := e.repo.Ignored(shown...)
 	if err != nil {
 		return fmt.Errorf("cannot check .gitignore rules for postBump output: %w", err)
 	}
-	lines := make([]string, len(ignored))
-	for i, ig := range ignored {
-		lines[i] = fmt.Sprintf("%s (ignored by %s)", ig.Path, ig.Rule)
+	rules := map[string]string{}
+	for _, ig := range ignored {
+		rules[ig.Path] = ig.Rule
 	}
-	return fmt.Errorf("the release commit would leave out files matching postBumpPaths, because git ignores them — "+
-		"remove or narrow each matching rule (source:line:pattern below), or point postBumpPaths at tracked files:\n  %s",
-		strings.Join(lines, "\n  "))
+	lines := make([]string, 0, len(shown)+1)
+	for _, f := range shown {
+		if rule, ok := rules[f]; ok {
+			lines = append(lines, fmt.Sprintf("%s (ignored by %s)", f, rule))
+		} else {
+			lines = append(lines, f) // the rule could not be named; the file still is
+		}
+	}
+	if more := len(left) - len(shown); more > 0 {
+		lines = append(lines, fmt.Sprintf("and %d more", more))
+	}
+	return fmt.Errorf("the release commit would leave out files a postBump command created or changed under "+
+		"postBumpPaths, because git ignores them — remove or narrow each matching rule (source:line:pattern "+
+		"below), or point postBumpPaths at tracked files:\n  %s", strings.Join(lines, "\n  "))
 }
 
 // where names a package scope's directory for messages; the root is implied.

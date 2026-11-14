@@ -58,6 +58,10 @@ type HookRunner interface {
 	RunHook(h HookSpec) (stdout string, err error)
 }
 
+// hookWaitDelay bounds how long RunHook waits for a hook's output pipes after
+// the hook exits or is stopped. It is a variable so a test can shorten it.
+var hookWaitDelay = 5 * time.Second
+
 // ExecRunner is the production Runner: the real binary.
 type ExecRunner struct{}
 
@@ -85,7 +89,8 @@ func (r ExecRunner) RunEnv(dir string, env []string, name string, args ...string
 // tokens (a hook runs third-party code that has no need of them), plus
 // h.Env. With h.Out set, output streams there as it is produced and the
 // returned error leaves it out; otherwise the whole output is returned and
-// quoted in the error.
+// quoted in the error. A timeout stops only the hook's own process: programs
+// it started may keep running, and the error says so.
 func (ExecRunner) RunHook(h HookSpec) (string, error) {
 	ctx := context.Background()
 	if h.Timeout > 0 {
@@ -96,9 +101,9 @@ func (ExecRunner) RunHook(h HookSpec) (string, error) {
 	cmd := exec.CommandContext(ctx, h.Name, h.Args...)
 	cmd.Dir = h.Dir
 	cmd.Env = HookEnviron(os.Environ(), h.Env)
-	// A hook's own children can hold its output pipes open after it is
-	// killed; give up on them shortly instead of waiting for them.
-	cmd.WaitDelay = 5 * time.Second
+	// A hook's own children can hold its output pipes open after it exits
+	// or is killed; stop waiting for them after a short delay.
+	cmd.WaitDelay = hookWaitDelay
 
 	var captured strings.Builder
 	var w io.Writer = &captured
@@ -109,6 +114,11 @@ func (ExecRunner) RunHook(h HookSpec) (string, error) {
 	// writer shared by Stdout and Stderr.
 	cmd.Stdout, cmd.Stderr = w, w
 	err := cmd.Run()
+	// A hook that exited 0 and left a background child holding its output
+	// pipe still succeeded: only output printed after the exit is dropped.
+	if errors.Is(err, exec.ErrWaitDelay) && ctx.Err() == nil && cmd.ProcessState != nil && cmd.ProcessState.Success() {
+		err = nil
+	}
 	out := captured.String()
 	if err == nil {
 		return out, nil
@@ -118,7 +128,8 @@ func (ExecRunner) RunHook(h HookSpec) (string, error) {
 		detail = ": " + strings.TrimSpace(out)
 	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return out, fmt.Errorf("%s %s timed out after %s%s", h.Name, strings.Join(h.Args, " "), h.Timeout, detail)
+		return out, fmt.Errorf("%s %s timed out after %s; gala stopped the command's own process, and programs it "+
+			"started may still be running%s", h.Name, strings.Join(h.Args, " "), h.Timeout, detail)
 	}
 	return out, fmt.Errorf("%s %s failed: %w%s", h.Name, strings.Join(h.Args, " "), err, detail)
 }
