@@ -69,14 +69,15 @@ A promotion that releases nothing still leaves `dev` one merge commit behind `ma
 | go | none | the tag is the publish |
 | GitHub Release | `GITHUB_TOKEN` or `GH_TOKEN` | with no token, gala warns and skips; it never fails after the tags are pushed |
 
-This repository's rulesets block direct pushes to `main` and `dev`, and block creating `v*` tags. The release and sync pushes therefore need a bypass actor, or the push in step 8 is rejected. On a personal-account repository, GitHub Actions can't be a bypass actor, so the rulesets exempt deploy keys instead. `release.yml` checks out with a write-access deploy key whose private half is the `RELEASE_DEPLOY_KEY` secret. If that secret is removed or the key loses write access, the atomic push in step 8 fails after the local commit and tag have been written, and nothing reaches the remote.
+This repository's rulesets block direct pushes to `main` and `dev`, and block creating `v*` tags. The release and sync pushes therefore need a bypass actor, or the push in step 8 is rejected. On a personal-account repository, GitHub Actions can't be a bypass actor, so the rulesets exempt deploy keys instead. `release.yml` checks out with a write-access deploy key whose private half is the `RELEASE_DEPLOY_KEY` secret. If that secret is removed or the key loses write access, the atomic push in step 8 fails after the local commit and tag have been written, and nothing reaches the remote; gala then removes that local commit and tag again.
 
 ## Recovering from a partial release
 
 gala has no resume command. Recovery is manual on purpose, and the failure message prints the exact state: which tag was pushed, which package failed, the tool's output, and the command to run.
 
 - **A `postBump` command failed.** Nothing was committed, tagged, or pushed. The working tree holds the version writes: review them with `git status`, discard them with `git restore`, fix the command, and release again.
-- **Tag pushed, publish failed.** Fix the registry problem, then run the printed command (`npm publish`, `cargo publish`, `uv publish`, or `dotnet nuget push`) in the package directory. The tag, changelog, and GitHub Release are already correct.
-- **GitHub Release failed.** The tags are pushed. Create the release by hand from the existing tag, or fix API access and run it again.
+- **The tag or the atomic push failed.** Nothing reached the remote. gala removes its local release commit and tags and resets the working tree to the commit it started from (the preflight requires a clean tree, so nothing of yours is lost), then prints the cause. Fix it and release again. If gala cannot confirm what the remote has, or cannot undo the local state, it leaves things in place and prints the `git tag -d` and `git reset --hard` commands that restore the starting state.
+- **Tag pushed, publish failed.** Fix the registry problem, then run the printed commands (`npm publish`, `cargo publish`, `uv publish`, or `dotnet nuget push`) in the package directories, in order: the failing package and every package after it. The tag, changelog, and GitHub Release are already correct.
+- **GitHub Release failed.** The tags are pushed, so running gala again finds nothing due. The failure message prints one `gh release create <tag> --verify-tag` command for each release still missing, followed by the publish commands for the packages that were going to publish. A tag that already has a release counts as done, so creating a release by hand and then running the printed publish commands is safe.
 - **Sync push rejected.** `dev` has commits the release doesn't. The warning prints the merge command, and `dev` was never force-pushed.
 - **Never** delete and recreate a tag that's already been published to a registry.

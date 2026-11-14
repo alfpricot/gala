@@ -35,6 +35,25 @@ func (g *Repo) TagAnnotated(name, message string) error {
 	return err
 }
 
+// DeleteTag removes a local tag.
+func (g *Repo) DeleteTag(name string) error {
+	if strings.HasPrefix(name, "-") {
+		return fmt.Errorf("refusing to delete a tag whose name starts with -: %q", name)
+	}
+	_, err := g.Run("tag", "-d", name)
+	return err
+}
+
+// ResetHard moves HEAD, the index and the working tree to a commit, which
+// must be a full hash so it can never be read as an option.
+func (g *Repo) ResetHard(hash string) error {
+	if !isHash(hash) {
+		return fmt.Errorf("refusing to reset to %q: not a commit hash", hash)
+	}
+	_, err := g.Run("reset", "--hard", "-q", hash)
+	return err
+}
+
 // PushAtomic pushes refs (branch and tags) in one atomic push: they land
 // together or not at all.
 func (g *Repo) PushAtomic(remote string, refs ...string) error {

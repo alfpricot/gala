@@ -6,11 +6,17 @@ package github
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 )
+
+// ErrReleaseExists is wrapped by the error CreateRelease returns when GitHub
+// reports that a release for the tag already exists (HTTP 422 with an
+// already_exists validation error), so a caller can treat it as done.
+var ErrReleaseExists = errors.New("a release for this tag already exists")
 
 // Client creates releases against the GitHub REST API.
 type Client struct {
@@ -78,5 +84,28 @@ func (c *Client) CreateRelease(owner, repo, tag, name, body string) error {
 		return nil
 	}
 	msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode == http.StatusUnprocessableEntity && releaseExists(msg) {
+		return fmt.Errorf("github release for %s: %w", tag, ErrReleaseExists)
+	}
 	return fmt.Errorf("github release for %s: %s: %s", tag, resp.Status, strings.TrimSpace(string(msg)))
+}
+
+// releaseExists reports whether a 422 body carries the already_exists
+// validation error GitHub returns for a tag that already has a release.
+func releaseExists(body []byte) bool {
+	var v struct {
+		Errors []struct {
+			Resource string `json:"resource"`
+			Code     string `json:"code"`
+		} `json:"errors"`
+	}
+	if json.Unmarshal(body, &v) != nil {
+		return false
+	}
+	for _, e := range v.Errors {
+		if e.Resource == "Release" && e.Code == "already_exists" {
+			return true
+		}
+	}
+	return false
 }
