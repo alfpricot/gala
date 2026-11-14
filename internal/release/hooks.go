@@ -1,7 +1,9 @@
 package release
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -91,6 +93,26 @@ func hookEnv(due []*PackagePlan, pkg *PackagePlan) []string {
 	return env
 }
 
+// commands lists the scope's preRelease commands followed by its postBump
+// commands, the order every check that covers all of a scope's commands uses.
+func (s scope) commands() []config.Command {
+	return slices.Concat(s.hooks.PreRelease, s.hooks.PostBump)
+}
+
+// program resolves a command's program the way it will run: a bare name is
+// looked up on PATH (named is false), and a name with a path separator is
+// joined to the scope's directory unless it is absolute (named is true).
+func (s scope) program(cmd config.Command) (program string, named bool) {
+	name := cmd.Argv[0]
+	if !strings.ContainsAny(name, `/\`) {
+		return name, false
+	}
+	if !filepath.IsAbs(name) {
+		name = filepath.Join(s.dir, filepath.FromSlash(name))
+	}
+	return name, true
+}
+
 // allowedPostBump reports whether a changed path is one a postBump command of
 // any scope may change.
 func allowedPostBump(scopes []scope, p string) bool {
@@ -108,12 +130,8 @@ func allowedPostBump(scopes []scope, p string) bool {
 // directory it runs from.
 func (e *Engine) hookTools(due []*PackagePlan) (onPath []string, byPath []string) {
 	for _, s := range e.scopes(due) {
-		for _, cmd := range append(append([]config.Command(nil), s.hooks.PreRelease...), s.hooks.PostBump...) {
-			name := cmd.Argv[0]
-			if strings.ContainsAny(name, `/\`) {
-				if !filepath.IsAbs(name) {
-					name = filepath.Join(s.dir, filepath.FromSlash(name))
-				}
+		for _, cmd := range s.commands() {
+			if name, named := s.program(cmd); named {
 				byPath = append(byPath, name)
 			} else {
 				onPath = append(onPath, name)
@@ -176,11 +194,8 @@ func (e *Engine) checkBatchArgs(due []*PackagePlan) error {
 		return nil
 	}
 	for _, s := range e.scopes(due) {
-		for _, cmd := range slices.Concat(s.hooks.PreRelease, s.hooks.PostBump) {
-			program := cmd.Argv[0]
-			if strings.ContainsAny(program, `/\`) && !filepath.IsAbs(program) {
-				program = filepath.Join(s.dir, filepath.FromSlash(program))
-			}
+		for _, cmd := range s.commands() {
+			program, _ := s.program(cmd)
 			resolved, err := exec.LookPath(program)
 			if err != nil {
 				continue // reported by the tool and path checks
@@ -227,28 +242,79 @@ func dueVersionFiles(due []*PackagePlan) []config.VersionFile {
 }
 
 // runCommands runs one scope's commands in order and stops at the first
-// failure. Their output is echoed into the transcript.
+// failure. A runner that can stream (the production one) echoes each line into
+// the transcript as the command prints it and enforces the configured
+// timeout; any other runner returns the output when the command ends, and it
+// is echoed then.
 func (e *Engine) runCommands(key string, s scope, cmds []config.Command) error {
 	for _, cmd := range cmds {
 		where := e.where(s)
 		e.note("%-7s %s%s", hookLabel(key), cmd.Line, where)
-		var out string
 		var err error
-		if r, ok := e.opts.Exec.(manager.EnvRunner); ok {
-			out, err = r.RunEnv(s.dir, s.env, cmd.Argv[0], cmd.Argv[1:]...)
-		} else {
-			out, err = e.opts.Exec.Run(s.dir, cmd.Argv[0], cmd.Argv[1:]...)
+		switch r := e.opts.Exec.(type) {
+		case manager.HookRunner:
+			out := &indentWriter{w: e.opts.out(), prefix: "          "}
+			_, err = r.RunHook(manager.HookSpec{
+				Dir: s.dir, Env: s.env, Name: cmd.Argv[0], Args: cmd.Argv[1:],
+				Timeout: e.cfg.HookTimeout, Out: out,
+			})
+			out.Flush()
+		default:
+			var text string
+			if r, ok := e.opts.Exec.(manager.EnvRunner); ok {
+				text, err = r.RunEnv(s.dir, s.env, cmd.Argv[0], cmd.Argv[1:]...)
+			} else {
+				text, err = e.opts.Exec.Run(s.dir, cmd.Argv[0], cmd.Argv[1:]...)
+			}
+			if err == nil {
+				for _, line := range strings.Split(strings.TrimRight(text, "\r\n"), "\n") {
+					if strings.TrimSpace(line) != "" {
+						e.note("        %s", strings.TrimRight(line, "\r"))
+					}
+				}
+			}
 		}
 		if err != nil {
 			return fmt.Errorf("%s command %q%s failed: %w", key, cmd.Line, where, err)
 		}
-		for _, line := range strings.Split(strings.TrimRight(out, "\r\n"), "\n") {
-			if strings.TrimSpace(line) != "" {
-				e.note("        %s", strings.TrimRight(line, "\r"))
-			}
-		}
 	}
 	return nil
+}
+
+// indentWriter indents every complete line it receives and skips blank ones,
+// so a hook's output reads as part of the release transcript while it runs.
+type indentWriter struct {
+	w      io.Writer
+	prefix string
+	buf    []byte
+}
+
+func (i *indentWriter) Write(p []byte) (int, error) {
+	i.buf = append(i.buf, p...)
+	for {
+		nl := bytes.IndexByte(i.buf, '\n')
+		if nl < 0 {
+			return len(p), nil
+		}
+		i.line(string(i.buf[:nl]))
+		i.buf = i.buf[nl+1:]
+	}
+}
+
+// Flush writes a final line that had no newline.
+func (i *indentWriter) Flush() {
+	if len(i.buf) > 0 {
+		i.line(string(i.buf))
+		i.buf = nil
+	}
+}
+
+func (i *indentWriter) line(l string) {
+	l = strings.TrimRight(l, "\r")
+	if strings.TrimSpace(l) == "" {
+		return
+	}
+	_, _ = io.WriteString(i.w, i.prefix+l+"\n")
 }
 
 // preRelease runs every scope's preRelease commands after the preflights and
@@ -279,15 +345,58 @@ func (e *Engine) preRelease(due []*PackagePlan) error {
 	return nil
 }
 
-// postBump runs every scope's postBump commands after the version writes.
+// postBumpFailure is the tail of every error that stops a release after its
+// postBump commands ran: nothing is committed yet, but the writes are local.
+const postBumpFailure = "\n  nothing was committed, tagged, or pushed; the working tree holds the version " +
+	"writes — review them with git status and discard them with git restore before trying again"
+
+// postBump runs every scope's postBump commands after the version writes,
+// then refuses output that git ignores.
 func (e *Engine) postBump(scopes []scope) error {
 	for _, s := range scopes {
 		if err := e.runCommands("postBump", s, s.hooks.PostBump); err != nil {
-			return fmt.Errorf("%w\n  nothing was committed, tagged, or pushed; the working tree holds the version "+
-				"writes — review them with git status and discard them with git restore before trying again", err)
+			return fmt.Errorf("%w%s", err, postBumpFailure)
 		}
 	}
+	if err := e.checkPostBumpIgnored(scopes); err != nil {
+		return fmt.Errorf("%w%s", err, postBumpFailure)
+	}
 	return nil
+}
+
+// checkPostBumpIgnored refuses a postBump output that the release commit
+// would leave out: staging takes what git status reports, and git status never
+// reports an ignored file, so a file matching postBumpPaths that .gitignore
+// hides (a generated dist/ directory, typically) would be tagged without it.
+func (e *Engine) checkPostBumpIgnored(scopes []scope) error {
+	var specs []string
+	for _, s := range scopes {
+		specs = append(specs, s.hooks.PostBumpPaths...)
+	}
+	files, err := e.repo.IgnoredUntracked(specs...)
+	if err != nil {
+		return fmt.Errorf("cannot check .gitignore rules for postBump output: %w", err)
+	}
+	var left []string
+	for _, f := range files {
+		if allowedPostBump(scopes, f) {
+			left = append(left, f)
+		}
+	}
+	if len(left) == 0 {
+		return nil
+	}
+	ignored, err := e.repo.Ignored(left...)
+	if err != nil {
+		return fmt.Errorf("cannot check .gitignore rules for postBump output: %w", err)
+	}
+	lines := make([]string, len(ignored))
+	for i, ig := range ignored {
+		lines[i] = fmt.Sprintf("%s (ignored by %s)", ig.Path, ig.Rule)
+	}
+	return fmt.Errorf("the release commit would leave out files matching postBumpPaths, because git ignores them — "+
+		"remove or narrow each matching rule (source:line:pattern below), or point postBumpPaths at tracked files:\n  %s",
+		strings.Join(lines, "\n  "))
 }
 
 // where names a package scope's directory for messages; the root is implied.

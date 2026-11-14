@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestVersionFilesAndHooks(t *testing.T) {
@@ -186,5 +187,25 @@ pattern = '__version__ = "([^"]+)"'
 	// With every package naming its manager, the top-level one is optional.
 	if _, err := load(t, "kind = \"monorepo\"\n\n[[package]]\npath = \"a\"\nmanager = \"go\"\n"); err != nil {
 		t.Errorf("a monorepo whose packages all name a manager needs no top-level one: %v", err)
+	}
+}
+
+func TestHookTimeout(t *testing.T) {
+	cfg, err := load(t, "kind = \"app\"\nmanager = \"go\"\nhookTimeout = \"90s\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.HookTimeout != 90*time.Second {
+		t.Errorf("HookTimeout = %s, want 90s", cfg.HookTimeout)
+	}
+	cfg, err = load(t, "kind = \"app\"\nmanager = \"go\"\n")
+	if err != nil || cfg.HookTimeout != 0 {
+		t.Errorf("no hookTimeout must mean no limit: %v, %v", cfg.HookTimeout, err)
+	}
+	for _, bad := range []string{"\"ten minutes\"", "\"0s\"", "\"-5m\"", "\"10\""} {
+		if _, err := load(t, "kind = \"app\"\nmanager = \"go\"\nhookTimeout = "+bad+"\n"); err == nil ||
+			!strings.Contains(err.Error(), "hookTimeout") {
+			t.Errorf("hookTimeout = %s must be refused, naming the key: %v", bad, err)
+		}
 	}
 }

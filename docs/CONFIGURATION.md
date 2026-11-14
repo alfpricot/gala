@@ -76,6 +76,7 @@ pattern = '__version__ = "([^"]+)"'
 | `remote` | `"origin"` | used for the push and to work out the owner and repo |
 | `[[package]]` | none | monorepo only: two packages may not share a `tagPrefix`, or use prefixes where one extends the other with a digit; `path` is required; `name`, `tagPrefix`, `manager`, `publish`, `preRelease`, `postBump`, `postBumpPaths`, and `[[package.versionFile]]` are optional; declaration order is publish order |
 | `[[versionFile]]` | none | app only (a monorepo package uses `[[package.versionFile]]`): more files that carry the release version; see [Extra version files](#extra-version-files) |
+| `hookTimeout` | none | a Go duration such as `"10m"`: a `preRelease` or `postBump` command still running after that long is stopped and the release fails; see [Hook commands](#hook-commands) |
 | `preRelease` | `[]` | commands run after the preflights and before any write; see [Hook commands](#hook-commands) |
 | `postBump` | `[]` | commands run after the version writes and before staging |
 | `postBumpPaths` | `[]` | files, directories (everything under them), or `path.Match` patterns the `postBump` commands may change; needs `postBump` |
@@ -151,9 +152,14 @@ Each command gets these environment variables:
 
 `GALA_TAGS` is always set. The other four are set for a package's own commands, and for top-level commands when exactly one package releases (always, for an app).
 
+A command inherits the rest of gala's environment, with two removals. Every `GALA_*` variable from the parent process is dropped first, so a workflow that sets `GALA_VERSION` to pin the gala tool's own version never hands a hook a plausible-looking but wrong release version; pin the tool under another name. `GITHUB_TOKEN` and `GH_TOKEN` are dropped too, because hooks run third-party code (`npx`, a generator) that has no need of them. A hook that does call the GitHub API needs the token passed under another name in the workflow, such as `HOOK_GITHUB_TOKEN`.
+
+A command's output is printed as it runs, indented under the command, so a slow generator shows progress instead of staying silent until it exits. Set `hookTimeout` to stop a hung command (`hookTimeout = "10m"`): gala ends the command and the release fails the same way a failing command does, with nothing committed. The default is no limit, so a hung command runs until the CI job's own timeout.
+
 - `preRelease` runs during `release` and `--dry-run`, after every other preflight. These commands are checks: they must not change any tracked or unignored file, and the release stops if one does.
 - `postBump` runs during `release` only, after the manifests, version files, lockfiles, and changelog are written and before anything is staged. Use it to regenerate files that embed the version, such as generated source code. `--dry-run` lists the commands without running them.
 - Whatever a `postBump` command changes or creates must match the `postBumpPaths` of some scope that ran (an exact file, a directory entry such as `dist` covering everything under it, or a pattern), and those changes join the release commit. A change anywhere else is an error, the same as any other unexpected change. A package's `postBumpPaths` are relative to its directory.
+- A file matching `postBumpPaths` that `.gitignore` hides can't join the release commit, because staging takes what `git status` reports and git never reports an ignored file. gala stops after the `postBump` commands with the file and the matching rule, before anything is committed. Un-ignore the path, or list a tracked path instead (a tracked file is never ignored, so a force-added `src/parser.c` is fine).
 - If a `postBump` command fails, gala prints its output and stops. Nothing has been committed, tagged, or pushed at that point; discard the local writes with `git restore` (and remove any new files the command created) and release again.
 
 ## Cargo workspaces

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -115,6 +116,9 @@ type Config struct {
 	Packages        []Package
 	VersionFiles    []VersionFile // app only
 	Hooks
+	// HookTimeout ends a preRelease or postBump command that runs longer; zero
+	// means no limit.
+	HookTimeout time.Duration
 
 	// Source is the config file path, for messages.
 	Source string
@@ -158,6 +162,7 @@ type file struct {
 	PreRelease      []string          `toml:"preRelease"`
 	PostBump        []string          `toml:"postBump"`
 	PostBumpPaths   []string          `toml:"postBumpPaths"`
+	HookTimeout     string            `toml:"hookTimeout"`
 }
 
 // Load reads, decodes, and validates the config file at path.
@@ -309,6 +314,13 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Hooks, err = hooks(path, "", ".", f.PreRelease, f.PostBump, f.PostBumpPaths); err != nil {
 		return nil, err
+	}
+	if f.HookTimeout != "" {
+		d, err := time.ParseDuration(f.HookTimeout)
+		if err != nil || d <= 0 {
+			return nil, fmt.Errorf("%s: hookTimeout %q must be a positive duration such as \"10m\" or \"90s\"", path, f.HookTimeout)
+		}
+		cfg.HookTimeout = d
 	}
 	// A file can carry only one version, so two packages cannot share one.
 	owner := map[string]string{}
