@@ -44,13 +44,15 @@ func (g *Repo) DeleteTag(name string) error {
 	return err
 }
 
-// ResetHard moves HEAD, the index and the working tree to a commit, which
-// must be a full hash so it can never be read as an option.
-func (g *Repo) ResetHard(hash string) error {
+// ResetKeep moves HEAD and the files the intervening commits changed back to
+// a commit, keeping local edits to every other file. When a local edit touches
+// one of the files that would change, git refuses and nothing moves. The
+// argument must be a commit hash so it can never be read as an option.
+func (g *Repo) ResetKeep(hash string) error {
 	if !isHash(hash) {
 		return fmt.Errorf("refusing to reset to %q: not a commit hash", hash)
 	}
-	_, err := g.Run("reset", "--hard", "-q", hash)
+	_, err := g.Run("reset", "--keep", "-q", hash)
 	return err
 }
 

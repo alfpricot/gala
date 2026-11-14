@@ -150,7 +150,7 @@ func (e *Engine) execute(plan *Plan, publish bool) error {
 		refs = append(refs, pkg.NextTag)
 	}
 	if err := e.repo.PushAtomic(e.cfg.Remote, refs...); err != nil {
-		return e.afterRejectedPush(err, startSHA, created)
+		return e.afterRejectedPush(err, startSHA, created, due, publish)
 	}
 	e.note("push    %s → %s (%d tag%s, atomic)", e.branch, e.cfg.Remote, len(due), plural(len(due)))
 
@@ -261,32 +261,37 @@ func (e *Engine) recoveryLines(pkgs []*PackagePlan) []string {
 
 // abortLocal undoes the release commit and tags after a failure that left
 // nothing on the remote, so a re-run plans the same release again instead of
-// seeing the local tags and reporting nothing to do. The working tree was
-// clean when the release began (the preflight requires it), so resetting to
-// the starting commit restores exactly that state. When the undo itself
-// fails, the error prints the commands that do it.
+// seeing the local tags and reporting nothing to do. The branch moves back
+// with a keep-style reset, which never discards an edit the user made to a
+// tracked file while gala was running: it refuses when such an edit touches a
+// file the release commit changed, and leaves everything else in place. The
+// branch moves first and the tags go after it, so a refusal leaves the commit
+// and its tags together; the error then prints the commands that finish the
+// undo by hand.
 func (e *Engine) abortLocal(cause error, start string, tags []string) error {
-	var undoErr error
-	for _, t := range tags {
-		if err := e.repo.DeleteTag(t); err != nil && undoErr == nil {
-			undoErr = err
+	if err := e.repo.ResetKeep(start); err != nil {
+		return fmt.Errorf("%w\n  nothing was pushed, but gala could not move the branch back (%v), so it left the "+
+			"release commit and tags in place; restore the starting state by hand:\n%s",
+			cause, err, manualUndo(start, tags))
+	}
+	for i, t := range tags {
+		if err := e.repo.DeleteTag(t); err != nil {
+			return fmt.Errorf("%w\n  nothing was pushed and the branch is back at %s, but gala could not delete tag %s (%v); "+
+				"delete the remaining tags by hand:\n    git tag -d %s",
+				cause, start[:12], t, err, strings.Join(tags[i:], " "))
 		}
 	}
-	if err := e.repo.ResetHard(start); err != nil && undoErr == nil {
-		undoErr = err
-	}
-	if undoErr != nil {
-		return fmt.Errorf("%w\n  nothing was pushed, but gala could not remove the local release commit and tags (%v); "+
-			"restore the starting state by hand:\n%s", cause, undoErr, manualUndo(start, tags))
-	}
-	return fmt.Errorf("%w\n  nothing was pushed: the release commit and tags were removed and the working tree is back at %s, "+
-		"so the release can be run again once the cause is fixed", cause, start[:12])
+	return fmt.Errorf("%w\n  nothing was pushed: the release commit and tags were removed and the branch is back at %s "+
+		"(edits made to other tracked files since the release began were kept), so the release can be run again "+
+		"once the cause is fixed", cause, start[:12])
 }
 
 // afterRejectedPush handles a failed atomic push. It first asks the remote
 // whether it already holds the release commit (a push can fail after the
-// remote accepted it), and only undoes the local state when it does not.
-func (e *Engine) afterRejectedPush(pushErr error, start string, tags []string) error {
+// remote accepted it), and only undoes the local state when it does not. When
+// the push did land, the tags are published, so the workflow outputs say so
+// and the error lists the steps that never ran.
+func (e *Engine) afterRejectedPush(pushErr error, start string, tags []string, due []*PackagePlan, allowPublish bool) error {
 	cause := fmt.Errorf("atomic push failed: %w", pushErr)
 	head, err := e.repo.HeadSHA()
 	if err != nil {
@@ -299,20 +304,44 @@ func (e *Engine) afterRejectedPush(pushErr error, start string, tags []string) e
 		return fmt.Errorf("%w\n  gala could not ask %q what it has (%v), so it left the release commit and tags in place; "+
 			"if nothing was pushed, restore the starting state:\n%s", cause, e.cfg.Remote, err, manualUndo(start, tags))
 	case remoteSHA == head:
-		return fmt.Errorf("%w\n  the remote already has the release commit, so gala left the local commit and tags alone; "+
-			"check that the tags exist there (git ls-remote --tags %s)", cause, e.cfg.Remote)
+		if err := e.writeGitHubOutput(due); err != nil {
+			e.opts.warnf("%v", err)
+		}
+		return fmt.Errorf("%w\n  the remote already has the release commit and tags, so gala left the local commit and "+
+			"tags alone and running it again finds nothing due; finish by hand:\n%s",
+			cause, e.manualPushedSteps(due, allowPublish))
 	}
 	return e.abortLocal(cause, start, tags)
 }
 
-// manualUndo is the pair of commands that removes a release commit and its
-// tags from the local repository.
-func manualUndo(start string, tags []string) string {
+// manualPushedSteps lists what a release whose tags are pushed still has to
+// do: the branch sync when one is configured, the GitHub Releases when they
+// are on, and the publish command of each package that was going to publish.
+func (e *Engine) manualPushedSteps(due []*PackagePlan, allowPublish bool) string {
 	var lines []string
+	if e.cfg.SyncBranch != "" {
+		lines = append(lines, fmt.Sprintf("    git push %s %s:%s", e.cfg.Remote, e.branch, e.cfg.SyncBranch))
+	}
+	var releases []*PackagePlan
+	if e.cfg.GitHubRelease {
+		releases = due
+	}
+	if steps := e.manualFinish(releases, publishing(due, allowPublish)); steps != "" {
+		lines = append(lines, steps)
+	}
+	if len(lines) == 0 {
+		return "    nothing else to do; confirm the tags exist there with git ls-remote --tags " + e.cfg.Remote
+	}
+	return strings.Join(lines, "\n")
+}
+
+// manualUndo is the pair of commands that moves the branch back to the
+// starting commit and removes the release tags from the local repository.
+func manualUndo(start string, tags []string) string {
+	lines := []string{"    git reset --keep " + start}
 	if len(tags) > 0 {
 		lines = append(lines, "    git tag -d "+strings.Join(tags, " "))
 	}
-	lines = append(lines, "    git reset --hard "+start)
 	return strings.Join(lines, "\n")
 }
 

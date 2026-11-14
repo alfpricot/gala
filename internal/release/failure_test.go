@@ -217,6 +217,8 @@ func TestPushThatReachedTheRemoteKeepsLocalState(t *testing.T) {
 	}
 
 	opts, _, _ := testOptions(r, nil)
+	outputs := filepath.Join(t.TempDir(), "github_output")
+	opts.GitHubOutput = outputs
 	opts.Git = faultGit{inner: opts.Git, override: func(inner git.Runner, dir string, args []string) (string, bool, error) {
 		if len(args) > 1 && args[0] == "push" && args[1] == "--atomic" {
 			if _, err := inner.Run(dir, args...); err != nil {
@@ -230,7 +232,17 @@ func TestPushThatReachedTheRemoteKeepsLocalState(t *testing.T) {
 	if err == nil {
 		t.Fatal("the reported failure must surface")
 	}
-	mustContain(t, err.Error(), "the remote already has the release commit", "the error explains why nothing was undone")
+	mustContain(t, err.Error(), "the remote already has the release commit and tags", "the error explains why nothing was undone")
+	mustContain(t, err.Error(), "git push origin main:dev", "the branch sync that never ran is listed")
+	written, err2 := os.ReadFile(outputs)
+	if err2 != nil {
+		t.Fatal(err2)
+	}
+	mustContain(t, string(written), "released=true", "the tags are on the remote, so the outputs say so")
+	mustContain(t, string(written), "tag=v0.1.0", "the tag output")
+	if strings.Contains(string(written), "released=false") {
+		t.Errorf("released=false must not follow released=true:\n%s", written)
+	}
 	if got := tags(t, r); got != "v0.1.0" {
 		t.Errorf("the local tag must stay, got %q", got)
 	}
@@ -373,5 +385,94 @@ func TestPublishFailureListsEveryRemainingPackage(t *testing.T) {
 	}
 	if sha, err := gittest.Ref(bare, "refs/tags/core/v1.1.0"); err != nil || sha == "" {
 		t.Errorf("the pushed tag must stay on the remote: %s, %v", sha, err)
+	}
+}
+
+// rejectPushAfterEdit makes the atomic push fail after editing a tracked file
+// in the working tree, as a developer or an editor could while a push waits on
+// a passphrase or a key touch.
+func rejectPushAfterEdit(r *gittest.Repo, opts *Options, file string) {
+	opts.Git = faultGit{inner: opts.Git, override: func(_ git.Runner, _ string, args []string) (string, bool, error) {
+		if len(args) > 1 && args[0] == "push" && args[1] == "--atomic" {
+			if err := r.WriteFile(file, "edited while the push waited\n"); err != nil {
+				return "", true, err
+			}
+			return "", true, fmt.Errorf("rejected by the remote")
+		}
+		return "", false, nil
+	}}
+}
+
+// TestRollbackKeepsEditsToOtherFiles: an edit made to a tracked file the
+// release did not change survives the rollback.
+func TestRollbackKeepsEditsToOtherFiles(t *testing.T) {
+	r, _, cleanup := fixture(t, appConfig)
+	defer cleanup()
+	if err := r.CommitFile("app.go", "package app\n", "feat: first"); err != nil {
+		t.Fatal(err)
+	}
+	start, err := r.HeadSHA()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	opts, _, _ := testOptions(r, nil)
+	rejectPushAfterEdit(r, opts, "app.go")
+	err = Run(opts, ModeRelease)
+	if err == nil {
+		t.Fatal("a rejected push must fail the release")
+	}
+	mustContain(t, err.Error(), "the release commit and tags were removed", "the rollback went through")
+	head, err2 := r.HeadSHA()
+	if err2 != nil {
+		t.Fatal(err2)
+	}
+	if head != start {
+		t.Errorf("HEAD = %s, want the starting commit %s", head, start)
+	}
+	if got := tags(t, r); got != "" {
+		t.Errorf("local tags = %q, want none", got)
+	}
+	edited, err2 := r.ReadFile("app.go")
+	if err2 != nil {
+		t.Fatal(err2)
+	}
+	if edited != "edited while the push waited\n" {
+		t.Errorf("the edit to app.go was lost: %q", edited)
+	}
+}
+
+// TestRollbackRefusesOverEditsToReleaseFiles: an edit to a file the release
+// commit changed makes git refuse the reset, so gala leaves the commit and its
+// tags together and prints the commands that finish the undo by hand.
+func TestRollbackRefusesOverEditsToReleaseFiles(t *testing.T) {
+	r, _, cleanup := fixture(t, appConfig)
+	defer cleanup()
+	if err := r.CommitFile("app.go", "package app\n", "feat: first"); err != nil {
+		t.Fatal(err)
+	}
+	start, err := r.HeadSHA()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	opts, _, _ := testOptions(r, nil)
+	rejectPushAfterEdit(r, opts, "CHANGELOG.md")
+	err = Run(opts, ModeRelease)
+	if err == nil {
+		t.Fatal("a rejected push must fail the release")
+	}
+	mustContain(t, err.Error(), "could not move the branch back", "the refusal is reported")
+	mustContain(t, err.Error(), "git reset --keep "+start, "the manual command names the starting commit")
+	mustContain(t, err.Error(), "git tag -d v0.1.0", "the manual command names the tag")
+	if got := tags(t, r); got != "v0.1.0" {
+		t.Errorf("the tag must stay with its commit, got %q", got)
+	}
+	edited, err2 := r.ReadFile("CHANGELOG.md")
+	if err2 != nil {
+		t.Fatal(err2)
+	}
+	if edited != "edited while the push waited\n" {
+		t.Errorf("the edit to CHANGELOG.md was lost: %q", edited)
 	}
 }
