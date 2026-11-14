@@ -47,6 +47,7 @@ func TestPreflightRefusesAnExistingNextTag(t *testing.T) {
 			t.Fatal("release must refuse when the next tag already exists locally")
 		}
 		mustContain(t, err.Error(), "tag v0.1.0 already exists locally", "the error names the tag")
+		mustContain(t, err.Error(), "git push origin --delete v0.1.0", "a CI checkout re-fetches remote tags, so the advice covers the remote copy")
 		after, err := r.HeadSHA()
 		if err != nil {
 			t.Fatal(err)
@@ -189,6 +190,18 @@ tagPrefix = "v1."
 		mustContain(t, err.Error(), "overlapping tag prefixes", "the error names the overlap")
 	})
 
+	t.Run("a prefix another one extends with v reads as a version", func(t *testing.T) {
+		for _, pair := range [][2]string{{"x-", "x-v"}, {"x-", "x-v1"}, {"v", "v1."}} {
+			err := checkTagPrefixes([]spec{
+				{relDir: "a", prefix: pair[0]},
+				{relDir: "b", prefix: pair[1]},
+			})
+			if err == nil {
+				t.Errorf("prefixes %q and %q must be rejected", pair[0], pair[1])
+			}
+		}
+	})
+
 	t.Run("a prefix extended past a separator is fine", func(t *testing.T) {
 		if err := checkTagPrefixes([]spec{
 			{relDir: "a", prefix: "app/v"},
@@ -208,6 +221,12 @@ func TestDefaultTagPrefix(t *testing.T) {
 	}{
 		{config.ManagerGo, "libs/foo", "foo", "", "libs/foo/v"},
 		{config.ManagerGo, ".", "root", "", "v"},
+		// Go maps a module in a major-version directory to tags without that
+		// directory: example.com/m/foo/v2 is tagged foo/v2.x.y.
+		{config.ManagerGo, "v2", "m", "", "v"},
+		{config.ManagerGo, "foo/v2", "foo", "", "foo/v"},
+		{config.ManagerGo, "libs/foo/v10", "foo", "", "libs/foo/v"},
+		{config.ManagerGo, "libs/v1", "v1", "", "libs/v1/v"},
 		{config.ManagerNpm, "packages/core", "core", "", "core/v"},
 	}
 	for _, c := range cases {
@@ -215,4 +234,77 @@ func TestDefaultTagPrefix(t *testing.T) {
 			t.Errorf("defaultTagPrefix(%s, %q, %q) = %q, want %q", c.mgr, c.dir, c.name, got, c.want)
 		}
 	}
+}
+
+// TestLegacyGoPrefixIsRefused: a go package whose existing tags use the old
+// name-based default must not silently restart from 0.0.0 under the new
+// directory-based default.
+func TestLegacyGoPrefixIsRefused(t *testing.T) {
+	cfg := func(extra string) string {
+		return `kind = "monorepo"
+manager = "go"
+publish = false
+githubRelease = false
+releaseBranches = ["main"]
+
+[[package]]
+path = "libs/foo"
+` + extra
+	}
+	setup := func(t *testing.T, config string) *gittest.Repo {
+		t.Helper()
+		r, cleanup, err := gittest.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(cleanup)
+		if err := r.WriteFile("gala.toml", config); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.WriteFile("libs/foo/go.mod", "module example.com/org/foo\n\ngo 1.22\n"); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.CommitAll("chore: declare the package"); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.Tag("foo/v1.4.0"); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.CommitFile("libs/foo/foo.go", "package foo\n", "feat: add foo"); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+
+	t.Run("old tags and no new ones", func(t *testing.T) {
+		r := setup(t, cfg(""))
+		opts, _, _ := testOptions(r, nil)
+		err := Run(opts, ModePlan)
+		if err == nil {
+			t.Fatal("plan must refuse a package whose tags use the previous default prefix")
+		}
+		mustContain(t, err.Error(), `previous default prefix "foo/v"`, "the error names the old prefix")
+		mustContain(t, err.Error(), `tagPrefix = "foo/v"`, "the error names the fix")
+	})
+
+	t.Run("pinning the old prefix keeps versioning", func(t *testing.T) {
+		r := setup(t, cfg("tagPrefix = \"foo/v\"\n"))
+		opts, out, _ := testOptions(r, nil)
+		if err := Run(opts, ModePlan); err != nil {
+			t.Fatal(err)
+		}
+		mustContain(t, out.String(), "foo/v1.5.0", "the plan continues from foo/v1.4.0")
+	})
+
+	t.Run("tags already under the new prefix", func(t *testing.T) {
+		r := setup(t, cfg(""))
+		if _, err := r.Run("tag", "-a", "libs/foo/v1.4.0", "-m", "libs/foo/v1.4.0", "HEAD~1"); err != nil {
+			t.Fatal(err)
+		}
+		opts, out, _ := testOptions(r, nil)
+		if err := Run(opts, ModePlan); err != nil {
+			t.Fatal(err)
+		}
+		mustContain(t, out.String(), "libs/foo/v1.5.0", "the plan continues under the new prefix")
+	})
 }

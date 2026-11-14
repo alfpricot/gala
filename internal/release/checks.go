@@ -149,8 +149,10 @@ func (e *Engine) checkTags(due []*PackagePlan) error {
 		}
 		if local {
 			return fmt.Errorf("tag %s already exists locally but is not reachable from HEAD, so the plan did not see it — "+
-				"inspect it (git show %s); delete it (git tag -d %s) if it is stale, "+
-				"or merge the commit it points at into %s", pkg.NextTag, pkg.NextTag, pkg.NextTag, e.branch)
+				"inspect it (git show %s); if it is stale, delete it locally (git tag -d %s) and on the remote "+
+				"if it is there too (git push %s --delete %s), since a CI checkout fetches remote tags again "+
+				"on every run; otherwise merge the commit it points at into %s",
+				pkg.NextTag, pkg.NextTag, pkg.NextTag, e.cfg.Remote, pkg.NextTag, e.branch)
 		}
 		remoteSHA, err := e.repo.LsRemote(e.cfg.Remote, "refs/tags/"+pkg.NextTag)
 		if err != nil {
