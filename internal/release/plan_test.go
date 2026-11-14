@@ -447,7 +447,7 @@ func TestPrereleaseManifestFinalizes(t *testing.T) {
 	if err := r.CommitFile("src.txt", "x\n", "fix: a patch change"); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.CommitFile("src2.txt", "y\n", `Revert "feat: the flag (#12)"`); err != nil {
+	if err := r.CommitFile("src2.txt", "y\n", `Revert "feat: the flag (#12)" (#13)`); err != nil {
 		t.Fatal(err)
 	}
 

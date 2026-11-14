@@ -65,14 +65,70 @@ func Build(header string, commits []commit.Commit) string {
 
 // mentionRe matches an @handle (or @org/team) that GitHub would turn into a
 // mention: at the start of the text or after a character that cannot be part
-// of a word or an address, and not already inside a code span.
-var mentionRe = regexp.MustCompile("(^|[^\\w`@/.+-])@([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:/[A-Za-z0-9_.-]+)?)")
+// of a word or an address. Code spans are cut out before it runs.
+var mentionRe = regexp.MustCompile(`(^|[^\w@/.+-])@([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:/[A-Za-z0-9_.-]+)?)`)
+
+// asciiPunct are the characters a backslash can escape in markdown.
+const asciiPunct = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
 
 // neutralizeMentions wraps each @handle in a code span, so a commit subject
 // that names a user does not notify them when the entry is rendered in a
-// changelog, a release, or an issue.
+// changelog, a release, or an issue. Text already inside a code span is left
+// alone (GitHub never mentions there, and wrapping again would close the span
+// early), and so is an escaped backtick, which opens no span.
 func neutralizeMentions(text string) string {
-	return mentionRe.ReplaceAllString(text, "$1`@$2`")
+	var out strings.Builder
+	plain := 0 // start of the text not yet written
+	i := 0
+	for i < len(text) {
+		switch text[i] {
+		case '\\':
+			if i+1 < len(text) && strings.IndexByte(asciiPunct, text[i+1]) >= 0 {
+				i += 2
+				continue
+			}
+			i++
+		case '`':
+			j := i
+			for j < len(text) && text[j] == '`' {
+				j++
+			}
+			// A run of n backticks closes at the next run of exactly n; with
+			// none, the run is literal text.
+			end := closingRun(text, j, j-i)
+			if end < 0 {
+				i = j
+				continue
+			}
+			out.WriteString(mentionRe.ReplaceAllString(text[plain:i], "$1`@$2`"))
+			out.WriteString(text[i:end])
+			plain, i = end, end
+		default:
+			i++
+		}
+	}
+	out.WriteString(mentionRe.ReplaceAllString(text[plain:], "$1`@$2`"))
+	return out.String()
+}
+
+// closingRun returns the index just past the next run of exactly n backticks
+// at or after from, or -1.
+func closingRun(text string, from, n int) int {
+	for k := from; k < len(text); {
+		if text[k] != '`' {
+			k++
+			continue
+		}
+		m := k
+		for m < len(text) && text[m] == '`' {
+			m++
+		}
+		if m-k == n {
+			return m
+		}
+		k = m
+	}
+	return -1
 }
 
 // escapeScope backslash-escapes the markdown that would change how a scope

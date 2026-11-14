@@ -49,8 +49,10 @@ type Commit struct {
 var (
 	// header: type(scope)?!?: description
 	headerRe = regexp.MustCompile(`^([A-Za-z]+)(\(([^)]*)\))?(!)?:\s(.*)$`)
-	// revert: git's default subject for `git revert`, Revert "<original subject>"
-	revertRe = regexp.MustCompile(`^Revert "(.+)"$`)
+	// revert: git's default subject for `git revert`, Revert "<original subject>",
+	// optionally followed by the (#N) a squash merge appends to a pull request
+	// title (GitHub's Revert button opens a pull request with this title).
+	revertRe = regexp.MustCompile(`^Revert "(.+)"(?: \(#\d+\))?$`)
 	// footer: BREAKING CHANGE: text or BREAKING-CHANGE: text
 	breakingRe = regexp.MustCompile(`(?m)^BREAKING[- ]CHANGE:\s?(.*)$`)
 	// issue-style references in the subject, and in a body line that starts

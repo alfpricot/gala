@@ -34,6 +34,11 @@ func TestParseTypes(t *testing.T) {
 			conforming: true, bump: semver.Patch, kind: KindRevert},
 		{subject: `Revert "fix: tag order (#41)"`, typ: "revert", desc: "fix: tag order (#41)",
 			conforming: true, bump: semver.Patch, kind: KindRevert},
+		// A squash merge of GitHub's Revert pull request appends its own (#N).
+		{subject: `Revert "fix: tag order (#41)" (#43)`, typ: "revert", desc: "fix: tag order (#41)",
+			conforming: true, bump: semver.Patch, kind: KindRevert},
+		{subject: `Revert "feat: add the plan view" (#13)`, typ: "revert", desc: "feat: add the plan view",
+			conforming: true, bump: semver.Patch, kind: KindRevert},
 		{subject: "chore(release): v1.2.0", typ: "chore", scope: "release", desc: "v1.2.0",
 			conforming: true, bump: semver.None, kind: KindNone},
 		{subject: "docs: explain the config", typ: "docs", desc: "explain the config",

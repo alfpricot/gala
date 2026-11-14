@@ -427,7 +427,7 @@ func TestRecoveryCommands(t *testing.T) {
 		t.Errorf("cargo recovery = %q", got)
 	}
 	py, _ := New("pypi", &captureRunner{})
-	if got := py.Recovery("/repo/svc", "/repo"); got != "cd svc && uv build --out-dir gala-dist && uv publish gala-dist/*" {
+	if got := py.Recovery("/repo/svc", "/repo"); got != "cd svc && rm -rf gala-dist && uv build --out-dir gala-dist && uv publish gala-dist/* && rm -rf gala-dist" {
 		t.Errorf("pypi recovery builds into a fresh directory: %q", got)
 	}
 	g, _ := New("go", &captureRunner{})

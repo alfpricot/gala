@@ -159,7 +159,9 @@ func (p *pypiManager) Publish(dir string) error {
 }
 
 func (p *pypiManager) Recovery(dir, root string) string {
-	// A fresh output directory keeps files from earlier builds out of the
-	// upload; remove it afterwards.
-	return fmt.Sprintf("cd %s && uv build --out-dir gala-dist && uv publish gala-dist/*", rel(dir, root))
+	// The directory is emptied first, so files from earlier builds stay out of
+	// the upload, and removed afterwards, because an untracked directory left
+	// in the package fails the next release's clean-tree check.
+	return fmt.Sprintf("cd %s && rm -rf gala-dist && uv build --out-dir gala-dist && "+
+		"uv publish gala-dist/* && rm -rf gala-dist", rel(dir, root))
 }

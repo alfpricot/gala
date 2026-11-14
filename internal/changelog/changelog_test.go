@@ -203,6 +203,16 @@ func TestMentionsAndScopesAreNeutralized(t *testing.T) {
 		{"fix: keep `code` and **bold** as written", "* keep `code` and **bold** as written"},
 		{"fix(a*b_c): scoped", "* **a\\*b\\_c:** scoped"},
 		{"fix(@octocat): scoped to a user", "* **`@octocat`:** scoped to a user"},
+		// A handle inside an existing code span stays inside it.
+		{"fix: run `npx @vercel/ncc build` in CI", "* run `npx @vercel/ncc build` in CI"},
+		{"fix: run `pnpm add -D @types/node` now", "* run `pnpm add -D @types/node` now"},
+		{"fix: keep ``a `@x` b`` whole", "* keep ``a `@x` b`` whole"},
+		// An unmatched backtick opens no span, so the handle after it is live.
+		{"fix: a`@foo", "* a``@foo`"},
+		// A backticked handle in a scope is escaped, and still must not ping.
+		{"fix(`@foo`): x", "* **\\``@foo`\\`:** x"},
+		// Text after a span is scanned again.
+		{"fix: `code` then @octocat", "* `code` then `@octocat`"},
 	}
 	for _, tc := range cases {
 		got := Build("## 1.0.0", []commit.Commit{commit.Parse("h", tc.subject, "")})

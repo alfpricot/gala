@@ -14,12 +14,12 @@ The base version is the latest reachable stable tag, or the manifest's current v
 | `fix` | patch | Bug Fixes |
 | `perf` | patch | Performance |
 | `refactor` | patch | Refactoring |
-| `revert` (also git's default `Revert "<subject>"`) | patch | Reverts |
+| `revert` (also git's default `Revert "<subject>"`, with the ` (#N)` a squash merge appends) | patch | Reverts |
 | `!` suffix or `BREAKING CHANGE:`/`BREAKING-CHANGE:` footer | major (overrides the type) | Breaking Changes (listed first) |
 | `docs` `test` `style` `build` `ci` `chore` | none | hidden |
 | non-conforming message (includes promotion merge commits) | none | counted and reported as skipped |
 
-It's plain semver arithmetic with no special treatment for 0.x: `0.7.0` plus a major bump is `1.0.0`. A manifest that is at a prerelease finalizes it when the bump does not outrank it: `1.2.0-rc.1` with a patch or minor bump releases `1.2.0`, `1.2.1-rc.1` with a patch bump releases `1.2.1`, while `1.2.1-rc.1` with a minor bump releases `1.3.0`.
+It's plain semver arithmetic with no special treatment for 0.x: `0.7.0` plus a major bump is `1.0.0`. A manifest that is at a prerelease finalizes it when the bump does not outrank it: `1.2.0-rc.1` with a patch or minor bump releases `1.2.0`, `1.2.1-rc.1` with a patch bump releases `1.2.1`, while `1.2.1-rc.1` with a minor bump releases `1.3.0`. This applies when the package has no stable tag yet, such as a project adopting gala while it is at a release candidate. Once a stable tag exists the manifest must equal it, and a prerelease manifest is a drift error to reconcile by hand.
 
 Commit subjects render into the changelog and the GitHub Release as written, except that an `@handle` is wrapped in a code span so it never notifies the person, and markdown characters in a scope are escaped.
 
@@ -66,7 +66,7 @@ A promotion that releases nothing still leaves `dev` one merge commit behind `ma
 | --- | --- | --- |
 | npm | `npm login` or `NODE_AUTH_TOKEN` | `npm whoami` runs as a preflight when `publish = true` |
 | cargo | `CARGO_REGISTRY_TOKEN` | `cargo publish` checks it itself |
-| pypi (uv) | `UV_PUBLISH_TOKEN` | `uv build`, then `uv publish` |
+| pypi (uv) | `UV_PUBLISH_TOKEN` | `uv build` into a fresh temporary directory, then `uv publish` of exactly those files |
 | nuget (dotnet) | `defaultPushSource` in `NuGet.config`, plus an API key from `dotnet nuget setapikey` (user-level config) or a `%NUGET_AUTH_TOKEN%` reference in `<packageSourceCredentials>` | never commit the key; when `publish = true`, the preflight checks the push source and packability |
 | go | none | the tag is the publish |
 | GitHub Release | `GITHUB_TOKEN` or `GH_TOKEN` | with no token, gala warns and skips; it never fails after the tags are pushed |
@@ -80,7 +80,7 @@ gala has no resume command. Recovery is manual on purpose, and the failure messa
 - **A `postBump` command failed.** Nothing was committed, tagged, or pushed. The working tree holds the version writes: review them with `git status`, discard them with `git restore`, fix the command, and release again.
 - **The tag or the atomic push failed.** Nothing reached the remote. gala moves the branch back to the commit it started from with `git reset --keep`, deletes the tags it created, and prints the cause, so the release can be run again once that is fixed. The keep-style reset never discards an edit you made to a tracked file while gala was running: edits to other files stay in place, and an edit to a file the release commit changed makes git refuse, in which case gala leaves the commit and tags together and prints the `git reset --keep` and `git tag -d` commands to finish by hand. gala does the same when it cannot ask the remote what it has.
 - **The push failed after the remote accepted it.** gala asks the remote, and when it already holds the release commit it leaves the local commit and tags alone, writes the workflow outputs (`released=true`, the tags), and prints what never ran: the branch sync, one `gh release create` command per missing release, and the publish commands.
-- **Tag pushed, publish failed.** Fix the registry problem, then run the printed commands (`npm publish`, `cargo publish`, `uv publish`, or `dotnet nuget push`) in the package directories, in order: the failing package and every package after it. The tag, changelog, and GitHub Release are already correct.
+- **Tag pushed, publish failed.** Fix the registry problem, then run the printed commands (`npm publish`, `cargo publish`, `uv publish`, or `dotnet nuget push`) in the package directories, in order: the failing package and every package after it. The pypi and nuget commands build into a `gala-dist` or `gala-nupkg` directory in the package, emptied before the build and removed after the upload so that files from an earlier attempt are never uploaded and the next release's clean-tree check passes. The tag, changelog, and GitHub Release are already correct.
 - **GitHub Release failed.** The tags are pushed, so running gala again finds nothing due. The failure message prints one `gh release create <tag> --verify-tag` command for each release still missing, followed by the publish commands for the packages that were going to publish. A tag that already has a release counts as done, so creating a release by hand and then running the printed publish commands is safe.
 - **Sync push rejected.** `dev` has commits the release doesn't. The warning prints the merge command, and `dev` was never force-pushed.
 - **Never** delete and recreate a tag that's already been published to a registry.
