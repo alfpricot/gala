@@ -2,6 +2,7 @@ package github
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -79,6 +80,20 @@ func TestCreateReleaseErrorBody(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "v1.0.0") {
 		t.Errorf("error should name the tag: %v", err)
+	}
+}
+
+func TestCreateReleaseAlreadyExists(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = io.WriteString(w, `{"message":"Validation Failed","errors":[{"resource":"Release","code":"already_exists","field":"tag_name"}]}`)
+	}))
+	defer srv.Close()
+
+	c := &Client{HTTP: srv.Client(), Base: srv.URL, Token: "tok"}
+	err := c.CreateRelease("a", "r", "v1.0.0", "v1.0.0", "body")
+	if !errors.Is(err, ErrReleaseExists) {
+		t.Fatalf("a 422 already_exists on the Release resource must be ErrReleaseExists, got %v", err)
 	}
 }
 

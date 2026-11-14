@@ -35,6 +35,27 @@ func (g *Repo) TagAnnotated(name, message string) error {
 	return err
 }
 
+// DeleteTag removes a local tag.
+func (g *Repo) DeleteTag(name string) error {
+	if strings.HasPrefix(name, "-") {
+		return fmt.Errorf("refusing to delete a tag whose name starts with -: %q", name)
+	}
+	_, err := g.Run("tag", "-d", name)
+	return err
+}
+
+// ResetKeep moves HEAD and the files the intervening commits changed back to
+// a commit, keeping local edits to every other file. When a local edit touches
+// one of the files that would change, git refuses and nothing moves. The
+// argument must be a commit hash so it can never be read as an option.
+func (g *Repo) ResetKeep(hash string) error {
+	if !isHash(hash) {
+		return fmt.Errorf("refusing to reset to %q: not a commit hash", hash)
+	}
+	_, err := g.Run("reset", "--keep", "-q", hash)
+	return err
+}
+
 // PushAtomic pushes refs (branch and tags) in one atomic push: they land
 // together or not at all.
 func (g *Repo) PushAtomic(remote string, refs ...string) error {

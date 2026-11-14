@@ -1,6 +1,7 @@
 package release
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -119,6 +120,10 @@ func (e *Engine) execute(plan *Plan, publish bool) error {
 
 	// Step 6: the release commit, carrying the skip-ci marker so the push does
 	// not wake the release workflow again.
+	startSHA, err := e.repo.HeadSHA()
+	if err != nil {
+		return err
+	}
 	subject, body := releaseCommit(e.cfg.Kind == config.KindMonorepo, due)
 	if err := e.repo.Commit(subject, body); err != nil {
 		return fmt.Errorf("cannot create the release commit: %w\n"+
@@ -129,10 +134,12 @@ func (e *Engine) execute(plan *Plan, publish bool) error {
 
 	// Step 7: annotated tags, one per released package, message = the entry's
 	// header lines.
+	var created []string
 	for _, pkg := range due {
 		if err := e.repo.TagAnnotated(pkg.NextTag, pkg.Header); err != nil {
-			return fmt.Errorf("cannot tag %s: %w", pkg.NextTag, err)
+			return e.abortLocal(fmt.Errorf("cannot tag %s: %w", pkg.NextTag, err), startSHA, created)
 		}
+		created = append(created, pkg.NextTag)
 		e.note("tag     %s", pkg.NextTag)
 	}
 
@@ -143,7 +150,7 @@ func (e *Engine) execute(plan *Plan, publish bool) error {
 		refs = append(refs, pkg.NextTag)
 	}
 	if err := e.repo.PushAtomic(e.cfg.Remote, refs...); err != nil {
-		return fmt.Errorf("atomic push failed; nothing was pushed and no release was published: %w", err)
+		return e.afterRejectedPush(err, startSHA, created, due, publish)
 	}
 	e.note("push    %s → %s (%d tag%s, atomic)", e.branch, e.cfg.Remote, len(due), plural(len(due)))
 
@@ -168,7 +175,7 @@ func (e *Engine) execute(plan *Plan, publish bool) error {
 	}
 
 	// Step 10: GitHub Releases, only now that the tags exist remotely.
-	if err := e.githubReleases(due); err != nil {
+	if err := e.githubReleases(due, publish); err != nil {
 		return err
 	}
 
@@ -178,8 +185,9 @@ func (e *Engine) execute(plan *Plan, publish bool) error {
 
 // githubReleases creates one release per released tag, or warns and skips:
 // an absent token or a non-GitHub remote never fails a run whose tags are
-// already pushed.
-func (e *Engine) githubReleases(due []*PackagePlan) error {
+// already pushed. A tag that already has a release counts as done, so a
+// second attempt after a partial failure can finish the rest.
+func (e *Engine) githubReleases(due []*PackagePlan, allowPublish bool) error {
 	if !e.cfg.GitHubRelease {
 		return nil
 	}
@@ -203,36 +211,156 @@ func (e *Engine) githubReleases(due []*PackagePlan) error {
 	}
 
 	client := &github.Client{HTTP: e.opts.HTTP, Base: e.opts.APIBase, Token: e.opts.Token}
-	for _, pkg := range due {
-		title := pkg.NextTag
-		if e.cfg.Kind == config.KindMonorepo {
-			title = pkg.Name + " " + pkg.Next.String()
+	for i, pkg := range due {
+		err := client.CreateRelease(remote.Owner, remote.Repo, pkg.NextTag, e.releaseTitle(pkg), pkg.Entry)
+		switch {
+		case errors.Is(err, github.ErrReleaseExists):
+			e.note("release %s already exists on %s", pkg.NextTag, remote)
+		case err != nil:
+			return fmt.Errorf("%w\n  the tags are pushed, so running gala again finds nothing due; finish by hand:\n%s",
+				err, e.manualFinish(due[i:], publishing(due, allowPublish)))
+		default:
+			e.note("release %s on %s", pkg.NextTag, remote)
 		}
-		if err := client.CreateRelease(remote.Owner, remote.Repo, pkg.NextTag, title, pkg.Entry); err != nil {
-			return fmt.Errorf("%w\n  the tags are pushed but the release was not published and no registry "+
-				"publish ran; create it by hand or fix the API access and re-run the remaining steps", err)
-		}
-		e.note("release %s on %s", pkg.NextTag, remote)
 	}
 	return nil
 }
 
+// releaseTitle is the title of a package's GitHub Release.
+func (e *Engine) releaseTitle(pkg *PackagePlan) string {
+	if e.cfg.Kind == config.KindMonorepo {
+		return pkg.Name + " " + pkg.Next.String()
+	}
+	return pkg.NextTag
+}
+
+// manualFinish lists the commands that complete a release whose tags are
+// pushed: one gh release create per release still missing, then the publish
+// command of each package that was going to publish.
+func (e *Engine) manualFinish(releases, publishes []*PackagePlan) string {
+	var lines []string
+	for _, pkg := range releases {
+		lines = append(lines, fmt.Sprintf("    gh release create %s --verify-tag --title %q --notes-file <file holding the %s entry from %s>",
+			pkg.NextTag, e.releaseTitle(pkg), pkg.NextTag, e.cfg.Changelog))
+	}
+	lines = append(lines, e.recoveryLines(publishes)...)
+	return strings.Join(lines, "\n")
+}
+
+// recoveryLines is the manual publish command of each package, skipping a
+// manager (go) that has none.
+func (e *Engine) recoveryLines(pkgs []*PackagePlan) []string {
+	var lines []string
+	for _, pkg := range pkgs {
+		if cmd := pkg.Manager.Recovery(pkg.AbsDir, e.root); cmd != "" {
+			lines = append(lines, "    "+cmd)
+		}
+	}
+	return lines
+}
+
+// abortLocal undoes the release commit and tags after a failure that left
+// nothing on the remote, so a re-run plans the same release again instead of
+// seeing the local tags and reporting nothing to do. The branch moves back
+// with a keep-style reset, which never discards an edit the user made to a
+// tracked file while gala was running: it refuses when such an edit touches a
+// file the release commit changed, and leaves everything else in place. The
+// branch moves first and the tags go after it, so a refusal leaves the commit
+// and its tags together; the error then prints the commands that finish the
+// undo by hand.
+func (e *Engine) abortLocal(cause error, start string, tags []string) error {
+	if err := e.repo.ResetKeep(start); err != nil {
+		return fmt.Errorf("%w\n  nothing was pushed, but gala could not move the branch back (%v), so it left the "+
+			"release commit and tags in place; restore the starting state by hand:\n%s",
+			cause, err, manualUndo(start, tags))
+	}
+	for i, t := range tags {
+		if err := e.repo.DeleteTag(t); err != nil {
+			return fmt.Errorf("%w\n  nothing was pushed and the branch is back at %s, but gala could not delete tag %s (%v); "+
+				"delete the remaining tags by hand:\n    git tag -d %s",
+				cause, start[:12], t, err, strings.Join(tags[i:], " "))
+		}
+	}
+	return fmt.Errorf("%w\n  nothing was pushed: the release commit and tags were removed and the branch is back at %s "+
+		"(edits made to other tracked files since the release began were kept), so the release can be run again "+
+		"once the cause is fixed", cause, start[:12])
+}
+
+// afterRejectedPush handles a failed atomic push. It first asks the remote
+// whether it already holds the release commit (a push can fail after the
+// remote accepted it), and only undoes the local state when it does not. When
+// the push did land, the tags are published, so the workflow outputs say so
+// and the error lists the steps that never ran.
+func (e *Engine) afterRejectedPush(pushErr error, start string, tags []string, due []*PackagePlan, allowPublish bool) error {
+	cause := fmt.Errorf("atomic push failed: %w", pushErr)
+	head, err := e.repo.HeadSHA()
+	if err != nil {
+		return fmt.Errorf("%w\n  gala could not read HEAD to check the state; restore the starting state by hand if "+
+			"nothing was pushed:\n%s", cause, manualUndo(start, tags))
+	}
+	remoteSHA, err := e.repo.LsRemote(e.cfg.Remote, "refs/heads/"+e.branch)
+	switch {
+	case err != nil:
+		return fmt.Errorf("%w\n  gala could not ask %q what it has (%v), so it left the release commit and tags in place; "+
+			"if nothing was pushed, restore the starting state:\n%s", cause, e.cfg.Remote, err, manualUndo(start, tags))
+	case remoteSHA == head:
+		if err := e.writeGitHubOutput(due); err != nil {
+			e.opts.warnf("%v", err)
+		}
+		return fmt.Errorf("%w\n  the remote already has the release commit and tags, so gala left the local commit and "+
+			"tags alone and running it again finds nothing due; finish by hand:\n%s",
+			cause, e.manualPushedSteps(due, allowPublish))
+	}
+	return e.abortLocal(cause, start, tags)
+}
+
+// manualPushedSteps lists what a release whose tags are pushed still has to
+// do: the branch sync when one is configured, the GitHub Releases when they
+// are on, and the publish command of each package that was going to publish.
+func (e *Engine) manualPushedSteps(due []*PackagePlan, allowPublish bool) string {
+	var lines []string
+	if e.cfg.SyncBranch != "" {
+		lines = append(lines, fmt.Sprintf("    git push %s %s:%s", e.cfg.Remote, e.branch, e.cfg.SyncBranch))
+	}
+	var releases []*PackagePlan
+	if e.cfg.GitHubRelease {
+		releases = due
+	}
+	if steps := e.manualFinish(releases, publishing(due, allowPublish)); steps != "" {
+		lines = append(lines, steps)
+	}
+	if len(lines) == 0 {
+		return "    nothing else to do; confirm the tags exist there with git ls-remote --tags " + e.cfg.Remote
+	}
+	return strings.Join(lines, "\n")
+}
+
+// manualUndo is the pair of commands that moves the branch back to the
+// starting commit and removes the release tags from the local repository.
+func manualUndo(start string, tags []string) string {
+	lines := []string{"    git reset --keep " + start}
+	if len(tags) > 0 {
+		lines = append(lines, "    git tag -d "+strings.Join(tags, " "))
+	}
+	return strings.Join(lines, "\n")
+}
+
 // publish pushes to the registry in declaration order, each package through
 // its own manager. A failure reports the tool output and the manual recovery
-// command, then exits non-zero.
+// command for it and every package after it, then exits non-zero.
 func (e *Engine) publish(due []*PackagePlan, allowPublish bool) error {
 	publishing := publishing(due, allowPublish)
 	if len(publishing) == 0 {
 		e.note("publish skipped (publish = false)")
 		return nil
 	}
-	for _, pkg := range publishing {
+	for i, pkg := range publishing {
 		e.note("publish %s (%s) ...", pkg.Name, pkg.Manager.Name())
 		if err := pkg.Manager.Publish(pkg.AbsDir); err != nil {
 			return fmt.Errorf("publish failed for package %q: %w\n"+
-				"  the tag %s is pushed and the GitHub Release exists; gala has no resume command — "+
-				"fix the registry problem, then run:\n    %s",
-				pkg.Name, err, pkg.NextTag, pkg.Manager.Recovery(pkg.AbsDir, e.root))
+				"  the tag %s is pushed; gala has no resume command — "+
+				"fix the registry problem, then run:\n%s",
+				pkg.Name, err, pkg.NextTag, strings.Join(e.recoveryLines(publishing[i:]), "\n"))
 		}
 		e.note("        ok")
 	}

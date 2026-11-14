@@ -219,12 +219,12 @@ When `GITHUB_OUTPUT` is set, `gala release` appends step outputs for the job:
 
 The release outputs are written as soon as the atomic push succeeds, so a later failure (the GitHub Release or a publish) still reports the tags that exist; a run that stops before the push writes `released=false`. A failure to write `GITHUB_OUTPUT` only warns and never changes the exit code. `plan` and `--dry-run` write nothing.
 
-The example below dispatches a publish workflow for an app's single tag. `gh` in Actions needs a token in `GH_TOKEN`, and the job needs `actions: write` permission to dispatch. A monorepo release that pushes several tags sets no `tag`, so the step also checks it is not empty; loop over `tags` instead to dispatch one run per package.
+The example below dispatches a publish workflow for an app's single tag. `gh` in Actions needs a token in `GH_TOKEN`, and the job needs `actions: write` permission to dispatch. A monorepo release that pushes several tags sets no `tag`, so the step also checks it is not empty; loop over `tags` instead to dispatch one run per package. The condition starts with `!cancelled()` because a step with no status function gets an implicit `success()`, which would skip the dispatch when gala exits non-zero after the push (a GitHub Release or publish failure) even though the tags exist and nothing else would dispatch them.
 
 ```yaml
 - id: gala
   run: gala release
-- if: steps.gala.outputs.released == 'true' && steps.gala.outputs.tag != ''
+- if: ${{ !cancelled() && steps.gala.outputs.released == 'true' && steps.gala.outputs.tag != '' }}
   env:
     GH_TOKEN: ${{ github.token }}
     TAG: ${{ steps.gala.outputs.tag }}
