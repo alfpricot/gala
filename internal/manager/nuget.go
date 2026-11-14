@@ -382,8 +382,15 @@ func (n *nugetManager) Recovery(dir, root string) string {
 	if p, err := projectFile(dir); err == nil {
 		proj = filepath.Base(p)
 	}
-	return fmt.Sprintf("cd %s && dotnet pack %s --configuration %s --output nupkg && "+
-		"dotnet nuget push \"nupkg/*.nupkg\" --skip-duplicate", rel(dir, root), proj, packConfiguration)
+	// The directory is emptied first, so packages left by earlier builds stay
+	// out of the push (Publish packs into a temporary directory for the same
+	// reason), and removed afterwards, because an untracked directory left in
+	// the package fails the next release's clean-tree check. A project that
+	// builds a legacy .symbols.nupkg still has it matched by the glob;
+	// Publish filters it out, so delete it from the directory before pushing.
+	return fmt.Sprintf("cd %s && rm -rf gala-nupkg && dotnet pack %s --configuration %s --output gala-nupkg && "+
+		"dotnet nuget push \"gala-nupkg/*.nupkg\" --skip-duplicate && rm -rf gala-nupkg",
+		rel(dir, root), proj, packConfiguration)
 }
 
 // checkPackedVersion refuses packages whose file name does not end in the

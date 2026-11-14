@@ -348,6 +348,9 @@ path = "packages/cli"
 	mustContain(t, out2.String(), "publish core (cargo)", "the transcript shows each publish")
 }
 
+// uvOutDir matches the temporary directory a pypi release builds into.
+var uvOutDir = regexp.MustCompile(`.*gala-uv-[A-Za-z0-9]+`)
+
 func filepathSlash(p string) string { return strings.ReplaceAll(p, "\\", "/") }
 
 // TestReleasePerManager checks that `gala release` completes on an
@@ -359,6 +362,8 @@ func TestReleasePerManager(t *testing.T) {
 		files    map[string]string
 		manifest string // repo-relative file whose version the adapter writes by hand; "" when npm owns it
 		want     [][]string
+		// respond stands in for a tool that writes files (uv build).
+		respond func(dir, name string, args []string) (string, error)
 	}{
 		{
 			manager: "npm",
@@ -390,8 +395,14 @@ func TestReleasePerManager(t *testing.T) {
 			manifest: "pyproject.toml",
 			want: [][]string{
 				{"uv", "lock"},
-				{"uv", "build"},
-				{"uv", "publish"},
+				{"uv", "build", "--out-dir", "<out>"},
+				{"uv", "publish", "<out>/widget-1.1.0.tar.gz"},
+			},
+			respond: func(_, name string, args []string) (string, error) {
+				if name == "uv" && len(args) == 3 && args[0] == "build" {
+					return "", os.WriteFile(filepath.Join(args[2], "widget-1.1.0.tar.gz"), []byte("x"), 0o644)
+				}
+				return "", nil
 			},
 		},
 	}
@@ -427,7 +438,7 @@ func TestReleasePerManager(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			exec := &captureRunner{}
+			exec := &captureRunner{respond: tc.respond}
 			opts, out, warn := testOptions(r, exec)
 			if err := Run(opts, ModeRelease); err != nil {
 				t.Fatalf("release failed: %v\n%s", err, out.String())
@@ -435,7 +446,12 @@ func TestReleasePerManager(t *testing.T) {
 
 			var got [][]string
 			for _, c := range exec.calls {
-				got = append(got, append([]string{c.name}, c.args...))
+				argv := []string{c.name}
+				for _, a := range c.args {
+					// uv builds into a temporary directory with a random name.
+					argv = append(argv, uvOutDir.ReplaceAllString(a, "<out>"))
+				}
+				got = append(got, argv)
 			}
 			if strings.Join(flatten(got), " | ") != strings.Join(flatten(tc.want), " | ") {
 				t.Errorf("argv = %v, want %v", got, tc.want)
