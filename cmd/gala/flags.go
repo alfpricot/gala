@@ -10,6 +10,8 @@ type cli struct {
 	cwd       string
 	dryRun    bool
 	noPublish bool
+	resume    bool
+	packages  []string
 }
 
 const (
@@ -58,6 +60,20 @@ func parseArgs(args []string) (cli, error) {
 					return c, fmt.Errorf("flag %s does not take a value", name)
 				}
 				c.dryRun = true
+			case "--resume":
+				if hasValue {
+					return c, fmt.Errorf("flag %s does not take a value", name)
+				}
+				c.resume = true
+			case "--package":
+				if !hasValue {
+					var err error
+					value, i, err = needValue(args, i, name)
+					if err != nil {
+						return c, err
+					}
+				}
+				c.packages = append(c.packages, value)
 			case "--no-publish":
 				if hasValue {
 					return c, fmt.Errorf("flag %s does not take a value", name)
@@ -99,7 +115,7 @@ func parseArgs(args []string) (cli, error) {
 		c.command = cmdPlan
 	}
 
-	// --dry-run and --no-publish only mean something on a release.
+	// --dry-run, --no-publish and --resume only mean something on a release.
 	if c.command != cmdRelease {
 		if c.dryRun {
 			return c, fmt.Errorf("--dry-run only applies to `gala release`")
@@ -107,6 +123,15 @@ func parseArgs(args []string) (cli, error) {
 		if c.noPublish {
 			return c, fmt.Errorf("--no-publish only applies to `gala release`")
 		}
+		if c.resume {
+			return c, fmt.Errorf("--resume only applies to `gala release`")
+		}
+	}
+	if len(c.packages) > 0 && !c.resume {
+		return c, fmt.Errorf("--package only applies to `gala release --resume`")
+	}
+	if c.resume && c.dryRun {
+		return c, fmt.Errorf("--dry-run does not apply to --resume: a resume only repeats steps after the tags are pushed")
 	}
 
 	return c, nil

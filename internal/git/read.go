@@ -198,6 +198,21 @@ func (g *Repo) HasTag(tag string) (bool, error) {
 	return false, nil
 }
 
+// TagsAt lists the tags that point at HEAD, annotated or not.
+func (g *Repo) TagsAt() ([]string, error) {
+	out, err := g.Run("tag", "--list", "--points-at", "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	var tags []string
+	for _, l := range strings.Split(out, "\n") {
+		if l = strings.TrimSuffix(l, "\r"); l != "" {
+			tags = append(tags, l)
+		}
+	}
+	return tags, nil
+}
+
 // Log returns the commits in the given ranges (newest first) together with
 // the files each commit touched. Ranges are passed to a single batched
 // `git log --name-only`; the caller filters paths in process rather than
@@ -284,6 +299,16 @@ func (g *Repo) RevList(ranges []string) ([]string, error) {
 // HeadSHA is the hash HEAD resolves to.
 func (g *Repo) HeadSHA() (string, error) {
 	out, err := g.Run("rev-parse", "--verify", "--end-of-options", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// RefSHA returns the object a local ref names, unpeeled: for an annotated tag
+// that is the tag object, the same value ls-remote reports for the tag.
+func (g *Repo) RefSHA(ref string) (string, error) {
+	out, err := g.Run("rev-parse", "--verify", "--end-of-options", ref)
 	if err != nil {
 		return "", err
 	}

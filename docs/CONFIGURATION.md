@@ -218,12 +218,12 @@ When `GITHUB_OUTPUT` is set, `gala release` appends step outputs for the job:
 
 | Output | When | Value |
 | --- | --- | --- |
-| `released` | every `gala release` run | `true` once the tags are pushed, `false` when nothing was due or the run failed before the push |
+| `released` | every `gala release` run, including `--resume` | `true` once the tags are pushed, `false` when nothing was due or the run failed before the push |
 | `tag` | exactly one tag pushed | that tag, such as `v1.2.3` |
 | `version` | `kind = "app"` released | the new version, such as `1.2.3` |
 | `tags` | a release happened | every pushed tag, one per line |
 
-The release outputs are written as soon as the atomic push succeeds, so a later failure (the GitHub Release or a publish) still reports the tags that exist; a run that stops before the push writes `released=false`. A failure to write `GITHUB_OUTPUT` only warns and never changes the exit code. `plan` and `--dry-run` write nothing.
+The release outputs are written as soon as the atomic push succeeds, so a later failure (the GitHub Release or a publish) still reports the tags that exist; a run that stops before the push writes `released=false`. `gala release --resume` writes the same outputs again for the tags at `HEAD` (only the `--package` ones in a monorepo) once it has confirmed they are on the remote, before it creates releases or publishes, so a step that dispatches on `released == 'true'` runs again for a release the failed run already reported: make the dispatched workflow safe to repeat, or keep resume out of a job that has such a step. A failure to write `GITHUB_OUTPUT` only warns and never changes the exit code. `plan` and `--dry-run` write nothing.
 
 The example below dispatches a publish workflow for an app's single tag. `gh` in Actions needs a token in `GH_TOKEN`, and the job needs `actions: write` permission to dispatch. A monorepo release that pushes several tags sets no `tag`, so the step also checks it is not empty; loop over `tags` instead to dispatch one run per package. The condition starts with `!cancelled()` because a step with no status function gets an implicit `success()`, which would skip the dispatch when gala exits non-zero after the push (a GitHub Release or publish failure) even though the tags exist and nothing else would dispatch them.
 

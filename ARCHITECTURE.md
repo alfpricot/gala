@@ -2,7 +2,7 @@
 
 gala is a single Go binary that turns Conventional Commits into a release. It plans the next version from git history, writes the changelog and manifest, tags and pushes, creates a GitHub Release, and publishes to a package registry. `gala plan` stops after planning and never writes anything.
 
-The release steps are ordered so that when something fails, you can see what state you're in and fix it. Every check that can run before the first write does. All the git work finishes before any registry publish. There's no resume command: recovery is manual, and the failure message prints the exact state.
+The release steps are ordered so that when something fails, you can see what state you're in and fix it. Every check that can run before the first write does. All the git work finishes before any registry publish. A failed tag or push is undone locally, and a failure after the push is finished with `gala release --resume` or by hand, from the exact state the failure message prints.
 
 ## What gala is not
 

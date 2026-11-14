@@ -259,6 +259,16 @@ func TestPushThatReachedTheRemoteKeepsLocalState(t *testing.T) {
 // (git itself still talks to the bare repository) against a fake API.
 func githubFixture(t *testing.T, status int, body string) (*gittest.Repo, string, *captureRunner, *Options, func()) {
 	t.Helper()
+	return githubFixtureHandler(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}))
+}
+
+// githubFixtureHandler is githubFixture with the fake API's behavior left to
+// the caller, so a test can change it between runs.
+func githubFixtureHandler(t *testing.T, handler http.Handler) (*gittest.Repo, string, *captureRunner, *Options, func()) {
+	t.Helper()
 	cfg := "kind = \"app\"\nmanager = \"npm\"\npublish = true\ngithubRelease = true\nreleaseBranches = [\"main\"]\n"
 	r, cleanup, err := gittest.New()
 	if err != nil {
@@ -283,10 +293,7 @@ func githubFixture(t *testing.T, status int, body string) (*gittest.Repo, string
 	if err := r.CommitFile("src.txt", "x\n", "feat: a widget"); err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(status)
-		_, _ = w.Write([]byte(body))
-	}))
+	srv := httptest.NewServer(handler)
 	exec := &captureRunner{}
 	opts, _, _ := testOptions(r, exec)
 	opts.Token = "token"
@@ -327,7 +334,8 @@ func TestGitHubReleaseFailurePrintsManualSteps(t *testing.T) {
 		t.Fatal("a release API error must fail the run")
 	}
 	mustContain(t, err.Error(), "500", "the API status is kept")
-	mustContain(t, err.Error(), "running gala again finds nothing due", "the error explains why re-running does not help")
+	mustContain(t, err.Error(), "a plain release finds nothing due", "the error explains why a plain re-run does not help")
+	mustContain(t, err.Error(), "gala release --resume", "the error names the command that finishes the release")
 	mustContain(t, err.Error(), "gh release create v1.1.0 --verify-tag", "the manual release command")
 	mustContain(t, err.Error(), "cd . && npm publish", "the publish command that did not run")
 	if n := publishCalls(exec); n != 0 {

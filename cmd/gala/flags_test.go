@@ -106,3 +106,43 @@ func TestVersionFallsBackToDev(t *testing.T) {
 		t.Error("version must never be empty")
 	}
 }
+
+func TestParseArgsResume(t *testing.T) {
+	c, err := parseArgs([]string{"release", "--resume", "--package", "core", "--package=cli"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.command != cmdRelease || !c.resume || len(c.packages) != 2 || c.packages[0] != "core" || c.packages[1] != "cli" {
+		t.Errorf("got %+v", c)
+	}
+	for _, args := range [][]string{
+		{"--resume"},
+		{"plan", "--resume"},
+		{"release", "--package", "core"},
+		{"release", "--resume", "--dry-run"},
+		{"release", "--resume=yes"},
+		{"release", "--resume", "--package"},
+	} {
+		if _, err := parseArgs(args); err == nil {
+			t.Errorf("%v must be a usage error", args)
+		}
+	}
+}
+
+func TestUsageNamesEveryConfigKeyAndTheResumeCommand(t *testing.T) {
+	for _, want := range []string{
+		"[[versionFile]]", "preRelease", "postBump", "postBumpPaths", "hookTimeout",
+		"gala release --resume", "--package <name>",
+	} {
+		if !strings.Contains(usageText, want) {
+			t.Errorf("usage must mention %q:\n%s", want, usageText)
+		}
+	}
+	for _, want := range []string{
+		"preRelease commands run,", "nothing is written", "preRelease commands, no writes",
+	} {
+		if !strings.Contains(usageText, want) {
+			t.Errorf("usage must say that --dry-run runs the preRelease commands and writes nothing (missing %q):\n%s", want, usageText)
+		}
+	}
+}
