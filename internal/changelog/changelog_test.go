@@ -221,3 +221,33 @@ func TestMentionsAndScopesAreNeutralized(t *testing.T) {
 		}
 	}
 }
+
+func TestEntryReadsOneReleaseBack(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "CHANGELOG.md")
+	first := Build("## 1.1.0 (2026-10-27)", []commit.Commit{commit.Parse("a", "feat: second", "")})
+	older := Build("## 1.0.0 (2026-10-20)", []commit.Commit{commit.Parse("b", "feat: first", "")})
+	pkg := Build("## core 1.1.0 (2026-10-27)", []commit.Commit{commit.Parse("c", "fix: core fix", "")})
+	if err := os.WriteFile(path, []byte("# Changelog\n\n"+first+"\n\n"+pkg+"\n\n"+older+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for heading, want := range map[string]string{"1.1.0": first, "1.0.0": older, "core 1.1.0": pkg} {
+		got, err := Entry(path, heading)
+		if err != nil {
+			t.Fatalf("%s: %v", heading, err)
+		}
+		if got != want {
+			t.Errorf("%s = %q, want %q", heading, got, want)
+		}
+	}
+	if _, err := Entry(path, "9.9.9"); err == nil || !strings.Contains(err.Error(), "no entry headed") {
+		t.Errorf("a missing entry must be named: %v", err)
+	}
+	// CRLF files read the same.
+	if err := os.WriteFile(path, []byte(strings.ReplaceAll("# Changelog\n\n"+older+"\n", "\n", "\r\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := Entry(path, "1.0.0"); err != nil || got != older {
+		t.Errorf("CRLF entry = %q, %v", got, err)
+	}
+}

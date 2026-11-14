@@ -21,3 +21,9 @@ syncBranch = "dev"
 tagPrefix = "v"
 changelog = "CHANGELOG.md"
 remote = "origin"
+
+# The README pins this tag in its install command; a release bumps it with the
+# rest, so the pin never falls behind.
+[[versionFile]]
+path = "README.md"
+pattern = 'cmd/gala@v(\d+\.\d+\.\d+)'

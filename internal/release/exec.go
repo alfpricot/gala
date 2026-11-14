@@ -217,13 +217,36 @@ func (e *Engine) githubReleases(due []*PackagePlan, allowPublish bool) error {
 		case errors.Is(err, github.ErrReleaseExists):
 			e.note("release %s already exists on %s", pkg.NextTag, remote)
 		case err != nil:
-			return fmt.Errorf("%w\n  the tags are pushed, so running gala again finds nothing due; finish by hand:\n%s",
+			return fmt.Errorf("%w\n  the tags are pushed, so a plain release finds nothing due; fix the cause and run "+
+				"`gala release --resume` to create the releases and publish, or finish by hand:\n%s",
 				err, e.manualFinish(due[i:], publishing(due, allowPublish)))
 		default:
 			e.note("release %s on %s", pkg.NextTag, remote)
 		}
 	}
 	return nil
+}
+
+// resumeCommand is the gala command that finishes the given packages after a
+// failed publish: a monorepo names them, so a package that already published
+// is not published again, and an app has nothing to name.
+func (e *Engine) resumeCommand(pkgs []*PackagePlan) string {
+	cmd := "gala release --resume"
+	if e.cfg.Kind != config.KindMonorepo {
+		return cmd
+	}
+	for _, pkg := range pkgs {
+		cmd += " --package " + shellWord(pkg.Name)
+	}
+	return cmd
+}
+
+// shellWord quotes a name for a printed command only when it needs it.
+func shellWord(s string) string {
+	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._/-@") == "" {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // releaseTitle is the title of a package's GitHub Release.
@@ -308,7 +331,8 @@ func (e *Engine) afterRejectedPush(pushErr error, start string, tags []string, d
 			e.opts.warnf("%v", err)
 		}
 		return fmt.Errorf("%w\n  the remote already has the release commit and tags, so gala left the local commit and "+
-			"tags alone and running it again finds nothing due; finish by hand:\n%s",
+			"tags alone and a plain release finds nothing due; `gala release --resume` creates the GitHub Releases "+
+			"and publishes, and the branch sync is not part of it, so finish by hand:\n%s",
 			cause, e.manualPushedSteps(due, allowPublish))
 	}
 	return e.abortLocal(cause, start, tags)
@@ -358,9 +382,10 @@ func (e *Engine) publish(due []*PackagePlan, allowPublish bool) error {
 		e.note("publish %s (%s) ...", pkg.Name, pkg.Manager.Name())
 		if err := pkg.Manager.Publish(pkg.AbsDir); err != nil {
 			return fmt.Errorf("publish failed for package %q: %w\n"+
-				"  the tag %s is pushed; gala has no resume command — "+
-				"fix the registry problem, then run:\n%s",
-				pkg.Name, err, pkg.NextTag, strings.Join(e.recoveryLines(publishing[i:]), "\n"))
+				"  the tag %s is pushed; fix the registry problem, then run `%s` to finish the "+
+				"remaining packages, or run by hand:\n%s",
+				pkg.Name, err, pkg.NextTag, e.resumeCommand(publishing[i:]),
+				strings.Join(e.recoveryLines(publishing[i:]), "\n"))
 		}
 		e.note("        ok")
 	}

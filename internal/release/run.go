@@ -15,7 +15,7 @@ import (
 func Run(opts *Options, mode Mode) error {
 	var e *Engine
 	err := run(opts, mode, &e)
-	if mode == ModeRelease && (e == nil || !e.outputWritten) {
+	if (mode == ModeRelease || mode == ModeResume) && (e == nil || !e.outputWritten) {
 		if werr := appendGitHubOutput(opts.GitHubOutput, false, nil); werr != nil {
 			opts.warnf("%v", werr)
 		}
@@ -35,6 +35,12 @@ func run(opts *Options, mode Mode, engine **Engine) error {
 		if err := e.checks(); err != nil {
 			return err
 		}
+	}
+
+	// A resume has no plan: the release already happened, and what remains is
+	// read from the tags at HEAD.
+	if mode == ModeResume {
+		return e.resume(opts)
 	}
 
 	// Step 2: build the plan.

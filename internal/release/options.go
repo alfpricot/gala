@@ -33,6 +33,9 @@ const (
 	ModeDryRun
 	// ModeRelease runs everything.
 	ModeRelease
+	// ModeResume finishes a release whose tags are already pushed: the GitHub
+	// Release and the registry publish, for the tags that point at HEAD.
+	ModeResume
 )
 
 // Options are the injected dependencies. The zero value is not usable;
@@ -44,6 +47,9 @@ type Options struct {
 	ConfigPath string
 	// NoPublish turns publish = true off for this run.
 	NoPublish bool
+	// Packages limits a resume to the named packages; empty means every
+	// package with a release tag at HEAD.
+	Packages []string
 
 	// Stdout and Stderr receive the prose output.
 	Stdout io.Writer

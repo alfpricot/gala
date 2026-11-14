@@ -167,6 +167,36 @@ func bullet(c commit.Commit) string {
 	return line
 }
 
+// Entry returns the entry for heading from the changelog at path, header line
+// included: the lines from "## <heading> (" (or "## <heading>") up to the next
+// "## " heading. heading is the version for an app and "<name> <version>" for
+// a monorepo package, the same text Build puts in the header.
+func Entry(path, heading string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("cannot read %s: %w", path, err)
+	}
+	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+	start := -1
+	for i, l := range lines {
+		if l == "## "+heading || strings.HasPrefix(l, "## "+heading+" (") {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return "", fmt.Errorf("%s has no entry headed %q", path, "## "+heading)
+	}
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], "## ") {
+			end = i
+			break
+		}
+	}
+	return strings.TrimRight(strings.Join(lines[start:end], "\n"), "\n "), nil
+}
+
 // Prepend inserts entry into the changelog at path, newest first: after the
 // title header, before any existing "## " entry. A missing file is created
 // with a "# Changelog" title. Line endings are detected from the existing
