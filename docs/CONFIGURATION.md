@@ -25,11 +25,13 @@ manager = "npm"          # the default for every package
 [[package]]
 path = "packages/core"   # required; name defaults to the manifest's package name
 # name = "core"          # optional override
-# tagPrefix = "core/v"   # default "<name>/v"
+# tagPrefix = "core/v"   # default "<name>/v"; "<path>/v" for manager = "go" (a trailing /vN directory is dropped)
 
 [[package]]
 path = "packages/cli"    # declared after core because it depends on core
 ```
+
+A go package with no `tagPrefix` is tagged `<path>/vX.Y.Z` (plain `vX.Y.Z` at the repository root), because Go resolves a nested module's versions only from tags named after its directory. Earlier versions of gala used `<name>/v`; when a go package has tags under that old prefix and none under the new one, gala refuses to plan it and names both prefixes. Set `tagPrefix = "<name>/v"` to keep versioning from the existing tags, or tag the same commit with a `<path>/vX.Y.Z` tag to continue under the new prefix.
 
 ```toml
 # monorepo with several ecosystems: each package can override the manager,
@@ -72,8 +74,9 @@ pattern = '__version__ = "([^"]+)"'
 | `tagPrefix` | `"v"` | app only |
 | `changelog` | `"CHANGELOG.md"` | path relative to the repo root |
 | `remote` | `"origin"` | used for the push and to work out the owner and repo |
-| `[[package]]` | none | monorepo only: `path` is required; `name`, `tagPrefix`, `manager`, `publish`, `preRelease`, `postBump`, `postBumpPaths`, and `[[package.versionFile]]` are optional; declaration order is publish order |
+| `[[package]]` | none | monorepo only: two packages may not share a `tagPrefix`, or use prefixes where one extends the other with a digit; `path` is required; `name`, `tagPrefix`, `manager`, `publish`, `preRelease`, `postBump`, `postBumpPaths`, and `[[package.versionFile]]` are optional; declaration order is publish order |
 | `[[versionFile]]` | none | app only (a monorepo package uses `[[package.versionFile]]`): more files that carry the release version; see [Extra version files](#extra-version-files) |
+| `hookTimeout` | none | a Go duration such as `"10m"`: a `preRelease` or `postBump` command still running after that long has its own process stopped and the release fails; see [Hook commands](#hook-commands) |
 | `preRelease` | `[]` | commands run after the preflights and before any write; see [Hook commands](#hook-commands) |
 | `postBump` | `[]` | commands run after the version writes and before staging |
 | `postBumpPaths` | `[]` | files, directories (everything under them), or `path.Match` patterns the `postBump` commands may change; needs `postBump` |
@@ -149,9 +152,14 @@ Each command gets these environment variables:
 
 `GALA_TAGS` is always set. The other four are set for a package's own commands, and for top-level commands when exactly one package releases (always, for an app).
 
+A command inherits the rest of gala's environment, with two removals. Every `GALA_*` variable from the parent process is dropped first, so a workflow that sets `GALA_VERSION` to pin the gala tool's own version never hands a hook a plausible-looking but wrong release version; pin the tool under another name. `GITHUB_TOKEN` and `GH_TOKEN` are dropped too, because hooks run third-party code (`npx`, a generator) that has no need of them. A hook that does call the GitHub API needs the token passed under another name in the workflow, such as `HOOK_GITHUB_TOKEN`.
+
+A command's output is printed as it runs, indented under the command, so a slow generator shows progress instead of staying silent until it exits. Set `hookTimeout` to stop a hung command (`hookTimeout = "10m"`): gala stops the command's own process and the release fails the same way a failing command does, with nothing committed. Programs the command started (the node and native processes behind `npx` or `npm run`) are not stopped with it and may keep running and writing files, so check for them before running `git restore` or releasing again. The default is no limit, so a hung command runs until the CI job's own timeout.
+
 - `preRelease` runs during `release` and `--dry-run`, after every other preflight. These commands are checks: they must not change any tracked or unignored file, and the release stops if one does.
 - `postBump` runs during `release` only, after the manifests, version files, lockfiles, and changelog are written and before anything is staged. Use it to regenerate files that embed the version, such as generated source code. `--dry-run` lists the commands without running them.
 - Whatever a `postBump` command changes or creates must match the `postBumpPaths` of some scope that ran (an exact file, a directory entry such as `dist` covering everything under it, or a pattern), and those changes join the release commit. A change anywhere else is an error, the same as any other unexpected change. A package's `postBumpPaths` are relative to its directory.
+- A file matching `postBumpPaths` that `.gitignore` hides can't join the release commit, because staging takes what `git status` reports and git never reports an ignored file. gala stops after the `postBump` commands with the file and the matching rule (the first twenty when there are more), before anything is committed. Only files the commands created or rewrote count, so ignored content that was already there, such as `node_modules` under a package directory, never stops a release. Un-ignore the path, or list a tracked path instead (a tracked file is never ignored, so a force-added `src/parser.c` is fine).
 - If a `postBump` command fails, gala prints its output and stops. Nothing has been committed, tagged, or pushed at that point; discard the local writes with `git restore` (and remove any new files the command created) and release again.
 
 ## Cargo workspaces
@@ -210,19 +218,19 @@ When `GITHUB_OUTPUT` is set, `gala release` appends step outputs for the job:
 
 | Output | When | Value |
 | --- | --- | --- |
-| `released` | every `gala release` run | `true` once the tags are pushed, `false` when nothing was due or the run failed before the push |
+| `released` | every `gala release` run, including `--resume` | `true` once the tags are pushed, `false` when nothing was due or the run failed before the push |
 | `tag` | exactly one tag pushed | that tag, such as `v1.2.3` |
 | `version` | `kind = "app"` released | the new version, such as `1.2.3` |
 | `tags` | a release happened | every pushed tag, one per line |
 
-The release outputs are written as soon as the atomic push succeeds, so a later failure (the GitHub Release or a publish) still reports the tags that exist; a run that stops before the push writes `released=false`. A failure to write `GITHUB_OUTPUT` only warns and never changes the exit code. `plan` and `--dry-run` write nothing.
+The release outputs are written as soon as the atomic push succeeds, so a later failure (the GitHub Release or a publish) still reports the tags that exist; a run that stops before the push writes `released=false`. `gala release --resume` writes the same outputs again for the tags at `HEAD` (only the `--package` ones in a monorepo) once it has confirmed they are on the remote, before it creates releases or publishes, so a step that dispatches on `released == 'true'` runs again for a release the failed run already reported: make the dispatched workflow safe to repeat, or keep resume out of a job that has such a step. A failure to write `GITHUB_OUTPUT` only warns and never changes the exit code. `plan` and `--dry-run` write nothing.
 
-The example below dispatches a publish workflow for an app's single tag. `gh` in Actions needs a token in `GH_TOKEN`, and the job needs `actions: write` permission to dispatch. A monorepo release that pushes several tags sets no `tag`, so the step also checks it is not empty; loop over `tags` instead to dispatch one run per package.
+The example below dispatches a publish workflow for an app's single tag. `gh` in Actions needs a token in `GH_TOKEN`, and the job needs `actions: write` permission to dispatch. A monorepo release that pushes several tags sets no `tag`, so the step also checks it is not empty; loop over `tags` instead to dispatch one run per package. The condition starts with `!cancelled()` because a step with no status function gets an implicit `success()`, which would skip the dispatch when gala exits non-zero after the push (a GitHub Release or publish failure) even though the tags exist and nothing else would dispatch them.
 
 ```yaml
 - id: gala
   run: gala release
-- if: steps.gala.outputs.released == 'true' && steps.gala.outputs.tag != ''
+- if: ${{ !cancelled() && steps.gala.outputs.released == 'true' && steps.gala.outputs.tag != '' }}
   env:
     GH_TOKEN: ${{ github.token }}
     TAG: ${{ steps.gala.outputs.tag }}

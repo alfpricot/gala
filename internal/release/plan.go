@@ -2,7 +2,9 @@ package release
 
 import (
 	"fmt"
+	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -142,14 +144,18 @@ func (p *Plan) Due() []*PackagePlan {
 // spec is a resolved package: name (from config or manifest), directories,
 // and the tag prefix its tags carry.
 type spec struct {
-	name    string
-	absDir  string
-	relDir  string
-	prefix  string
-	mgr     manager.Manager
-	publish bool
-	files   []config.VersionFile
-	hooks   config.Hooks
+	name   string
+	absDir string
+	relDir string
+	prefix string
+	// legacyPrefix is the name-based prefix a go package got before its
+	// default became directory-based; set only when it differs from prefix, so
+	// the plan can refuse to restart a package whose tags still use it.
+	legacyPrefix string
+	mgr          manager.Manager
+	publish      bool
+	files        []config.VersionFile
+	hooks        config.Hooks
 }
 
 // Plan computes the release plan (pipeline step 2). It writes nothing.
@@ -178,6 +184,13 @@ func (e *Engine) Plan(now time.Time) (*Plan, error) {
 			return nil, err
 		}
 		anchors[i], anchorVersions[i] = tag, v
+		if tag == "" && s.legacyPrefix != "" {
+			if old, _, err := selectTag(tags, s.legacyPrefix); err != nil {
+				return nil, err
+			} else if old != "" {
+				return nil, legacyPrefixError(s, old)
+			}
+		}
 	}
 
 	bases := make([]semver.Version, len(specs))
@@ -277,16 +290,88 @@ func (e *Engine) specs() ([]spec, error) {
 		}
 		seen[name] = p.Path
 
-		prefix := p.TagPrefix
+		prefix, legacy := p.TagPrefix, ""
 		if prefix == "" {
-			prefix = name + "/v"
+			prefix = defaultTagPrefix(p.Manager, p.Path, name)
+			if old := name + "/v"; old != prefix {
+				legacy = old
+			}
 		}
 		specs = append(specs, spec{
-			name: name, absDir: absDir, relDir: p.Path, prefix: prefix,
+			name: name, absDir: absDir, relDir: p.Path, prefix: prefix, legacyPrefix: legacy,
 			mgr: mgr, publish: p.Publish, files: p.VersionFiles, hooks: p.Hooks,
 		})
 	}
+	if err := checkTagPrefixes(specs); err != nil {
+		return nil, err
+	}
 	return specs, nil
+}
+
+// majorDirRe matches a Go major-version directory such as v2 or v10.
+var majorDirRe = regexp.MustCompile(`^v([2-9]|[1-9][0-9]+)$`)
+
+// defaultTagPrefix is the tag prefix a monorepo package gets when it sets
+// none. Go resolves a nested module's versions only from tags named
+// <subdir>/vX.Y.Z, so a go package defaults to its directory (and to plain "v"
+// for a module at the repository root); every other manager defaults to its
+// name. A trailing major-version directory (foo/v2) is dropped, because Go
+// maps module example.com/m/foo/v2 to tags foo/v2.x.y, not foo/v2/v2.x.y.
+func defaultTagPrefix(mgr config.ManagerName, relDir, name string) string {
+	if mgr != config.ManagerGo {
+		return name + "/v"
+	}
+	dir := relDir
+	if base := path.Base(dir); majorDirRe.MatchString(base) {
+		dir = path.Dir(dir)
+	}
+	if dir == "." {
+		return "v"
+	}
+	return dir + "/v"
+}
+
+// legacyPrefixError refuses to plan a go package whose existing tags use the
+// name-based default it had before the directory-based default: reading no
+// tag under the new prefix would restart its versions from 0.0.0 with a
+// changelog covering the whole history.
+func legacyPrefixError(s spec, oldTag string) error {
+	return fmt.Errorf("package %q has tags under its previous default prefix %q (latest %s) but none under "+
+		"the current default %q, so its next release would restart from the beginning of history — "+
+		"set tagPrefix = %q to keep versioning from those tags, "+
+		"or tag the same commit with a %sX.Y.Z tag to continue under the new prefix",
+		s.name, s.legacyPrefix, oldTag, s.prefix, s.legacyPrefix, s.prefix)
+}
+
+// checkTagPrefixes rejects two packages whose tags could be mistaken for one
+// another. An identical prefix shares a tag namespace outright. A prefix that
+// another one extends with a digit is just as ambiguous: with "v" and "v1."
+// the tag "v1.2.0" parses as a version of the first and belongs to the second.
+// semver.Parse drops one leading "v", so an extension that is "v" or "v"
+// followed by a digit ("x-" beside "x-v" or "x-v1") reads the same way.
+func checkTagPrefixes(specs []spec) error {
+	for i, a := range specs {
+		for _, b := range specs[i+1:] {
+			if a.prefix == b.prefix {
+				return fmt.Errorf("packages %q and %q both use tag prefix %q — "+
+					"give one of them a distinct tagPrefix so their releases do not share tags",
+					a.relDir, b.relDir, a.prefix)
+			}
+			short, long := a, b
+			if len(short.prefix) > len(long.prefix) {
+				short, long = long, short
+			}
+			rest, ok := strings.CutPrefix(long.prefix, short.prefix)
+			tail := strings.TrimPrefix(rest, "v")
+			if ok && rest != "" && (tail == "" || (tail[0] >= '0' && tail[0] <= '9')) {
+				return fmt.Errorf("packages %q and %q have overlapping tag prefixes %q and %q — "+
+					"a tag of the longer one can read as a version of the shorter one; "+
+					"give them distinct tagPrefix values",
+					short.relDir, long.relDir, short.prefix, long.prefix)
+			}
+		}
+	}
+	return nil
 }
 
 // selectTag returns the highest stable tag under prefix and its version.

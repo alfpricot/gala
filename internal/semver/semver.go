@@ -186,20 +186,32 @@ func (v Version) Stable() bool {
 
 // Bump applies a bump with plain semver arithmetic: there is no 0.x special
 // casing, so 0.7.0 with a major bump becomes 1.0.0.
+//
+// A prerelease finalizes when the bump does not outrank it: 1.2.0-rc.1 with a
+// patch or minor bump releases 1.2.0, and 1.2.1-rc.1 with a patch bump releases
+// 1.2.1, because the prerelease was already heading to that version. A bump
+// that outranks it (a minor bump on 1.2.1-rc.1, a major on 1.2.0-rc.1) moves
+// on to the next version as usual. This is the arithmetic npm's semver uses.
 func (v Version) Bump(b Bump) Version {
-	// A prerelease never survives a bump: the result is the next stable.
+	pre := len(v.Prerelease) > 0
 	v.Prerelease = nil
 	v.Build = ""
 	switch b {
 	case Major:
-		v.Major++
+		if v.Minor != 0 || v.Patch != 0 || !pre {
+			v.Major++
+		}
 		v.Minor = 0
 		v.Patch = 0
 	case Minor:
-		v.Minor++
+		if v.Patch != 0 || !pre {
+			v.Minor++
+		}
 		v.Patch = 0
 	case Patch:
-		v.Patch++
+		if !pre {
+			v.Patch++
+		}
 	}
 	return v
 }

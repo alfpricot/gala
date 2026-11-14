@@ -73,24 +73,11 @@ func GetTomlString(content, section, key string) (string, bool) {
 		}
 		rest := strings.TrimLeft(lines[i][m[4]:m[5]], " \t")
 		var raw string
-		if strings.HasPrefix(rest, `"`) {
-			closed := false
-			j := 1
-			for ; j < len(rest); j++ {
-				if rest[j] == '\\' {
-					j++
-					continue
-				}
-				if rest[j] == '"' {
-					j++
-					closed = true
-					break
-				}
-			}
+		if end, quoted, closed := quotedEnd(rest); quoted {
 			if !closed {
 				return "", false
 			}
-			raw = rest[:j]
+			raw = rest[:end]
 		} else {
 			j := strings.IndexAny(rest, " \t\r#")
 			if j < 0 {
@@ -160,20 +147,43 @@ func keyLineRe(key string) (*regexp.Regexp, error) {
 	return regexp.Compile(`^([ \t]*` + regexp.QuoteMeta(key) + `[ \t]*=[ \t]*)(.*)$`)
 }
 
-// valueSuffix returns everything after the value on the line: a trailing
-// comment and, for CRLF files, the carriage return.
-func valueSuffix(rest string) (string, error) {
-	if strings.HasPrefix(rest, `"`) {
+// quotedEnd reports whether rest starts with a quoted TOML string, a basic
+// "..." string (with backslash escapes) or a literal '...' string (none), and
+// where it ends: end is the index just past the closing quote. closed is false
+// for an unterminated string.
+func quotedEnd(rest string) (end int, quoted, closed bool) {
+	if rest == "" {
+		return 0, false, false
+	}
+	switch rest[0] {
+	case '"':
 		for i := 1; i < len(rest); i++ {
 			if rest[i] == '\\' {
 				i++
 				continue
 			}
 			if rest[i] == '"' {
-				return rest[i+1:], nil
+				return i + 1, true, true
 			}
 		}
-		return "", errors.New("unterminated string value")
+		return len(rest), true, false
+	case '\'':
+		if i := strings.IndexByte(rest[1:], '\''); i >= 0 {
+			return i + 2, true, true
+		}
+		return len(rest), true, false
+	}
+	return 0, false, false
+}
+
+// valueSuffix returns everything after the value on the line: a trailing
+// comment and, for CRLF files, the carriage return.
+func valueSuffix(rest string) (string, error) {
+	if end, quoted, closed := quotedEnd(rest); quoted {
+		if !closed {
+			return "", errors.New("unterminated string value")
+		}
+		return rest[end:], nil
 	}
 	// Unquoted value: it ends at whitespace or a comment.
 	for i := 0; i < len(rest); i++ {
@@ -184,6 +194,9 @@ func valueSuffix(rest string) (string, error) {
 	return "", nil
 }
 
+// unquote returns the value of a string as written: a "..." string with its
+// escapes resolved, a '...' literal string as is. Anything else is an
+// unquoted word, returned unchanged.
 func unquote(s string) (string, bool) {
 	if len(s) >= 2 && strings.HasPrefix(s, `"`) && strings.HasSuffix(s, `"`) {
 		v, err := strconv.Unquote(s)
@@ -191,6 +204,9 @@ func unquote(s string) (string, bool) {
 			return s[1 : len(s)-1], true
 		}
 		return v, true
+	}
+	if len(s) >= 2 && strings.HasPrefix(s, "'") && strings.HasSuffix(s, "'") {
+		return s[1 : len(s)-1], true
 	}
 	return s, s != ""
 }

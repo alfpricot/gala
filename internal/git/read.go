@@ -105,6 +105,34 @@ func (g *Repo) Ignored(paths ...string) ([]Ignore, error) {
 	return ignored, nil
 }
 
+// IgnoredUntracked lists the untracked files that git ignores under the given
+// pathspecs. Each pathspec is taken literally as a path or a wildcard
+// pattern, never as pathspec magic. Output is NUL-separated, because git
+// quotes a name containing a double quote, backslash, tab or newline
+// otherwise, and a quoted name would never match a postBumpPaths entry.
+func (g *Repo) IgnoredUntracked(pathspecs ...string) ([]string, error) {
+	if len(pathspecs) == 0 {
+		return nil, nil
+	}
+	args := []string{"ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--"}
+	for _, p := range pathspecs {
+		// A leading ./ keeps a path that starts with a colon from being
+		// read as pathspec magic.
+		args = append(args, "./"+p)
+	}
+	out, err := g.Run(args...)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, f := range strings.Split(out, "\x00") {
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	return files, nil
+}
+
 // CurrentBranch returns the checked-out branch name. It returns ErrDetached
 // when HEAD is not on a branch.
 func (g *Repo) CurrentBranch() (string, error) {
@@ -148,6 +176,37 @@ func (g *Repo) Tags() ([]string, error) {
 	for _, l := range strings.Split(out, "\n") {
 		l = strings.TrimSuffix(l, "\r")
 		if l != "" {
+			tags = append(tags, l)
+		}
+	}
+	return tags, nil
+}
+
+// HasTag reports whether the local repository has the named tag, whether or
+// not it is reachable from HEAD (Tags only lists reachable ones).
+func (g *Repo) HasTag(tag string) (bool, error) {
+	ref := "refs/tags/" + tag
+	out, err := g.Run("for-each-ref", "--format=%(refname)", ref)
+	if err != nil {
+		return false, err
+	}
+	for _, l := range strings.Split(out, "\n") {
+		if strings.TrimSuffix(l, "\r") == ref {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// TagsAt lists the tags that point at HEAD, annotated or not.
+func (g *Repo) TagsAt() ([]string, error) {
+	out, err := g.Run("tag", "--list", "--points-at", "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	var tags []string
+	for _, l := range strings.Split(out, "\n") {
+		if l = strings.TrimSuffix(l, "\r"); l != "" {
 			tags = append(tags, l)
 		}
 	}
@@ -240,6 +299,16 @@ func (g *Repo) RevList(ranges []string) ([]string, error) {
 // HeadSHA is the hash HEAD resolves to.
 func (g *Repo) HeadSHA() (string, error) {
 	out, err := g.Run("rev-parse", "--verify", "--end-of-options", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// RefSHA returns the object a local ref names, unpeeled: for an annotated tag
+// that is the tag object, the same value ls-remote reports for the tag.
+func (g *Repo) RefSHA(ref string) (string, error) {
+	out, err := g.Run("rev-parse", "--verify", "--end-of-options", ref)
 	if err != nil {
 		return "", err
 	}

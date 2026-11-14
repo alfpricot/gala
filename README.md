@@ -6,14 +6,14 @@ gala is a small release engine. It reads the Conventional Commits since your las
 
 It's named after the apple.
 
-It sticks to the release itself. There's no recovery tooling, no dependency-graph handling, no provenance, and no notifications. See [What gala does not do](#what-gala-does-not-do).
+It sticks to the release itself. There's no dependency-graph handling, no provenance, and no notifications. See [What gala does not do](#what-gala-does-not-do).
 
 ## Installation
 
 In CI, pin to a release tag so builds are reproducible:
 
 ```sh
-go install github.com/alfpricot/gala/cmd/gala@v0.1.1
+go install github.com/alfpricot/gala/cmd/gala@v0.3.1
 ```
 
 For local use, `@latest` is fine:
@@ -43,7 +43,7 @@ gala is a single Go binary with one runtime dependency, `github.com/BurntSushi/t
 
 ### Requirements
 
-- Go 1.27.3 or newer to build or install (the version in `go.mod`).
+- Go 1.27.4 or newer to build or install (the version in `go.mod`).
 - `git` on `PATH`.
 - For `gala release` (including `--dry-run`), the tool for each configured `manager` (a monorepo can set one per package): `npm`, `cargo`, `uv`, or `dotnet` (the .NET SDK, for `nuget`). gala runs it to write versions and refresh lockfiles, and to publish when `publish = true`. The `go` and `none` managers need nothing extra, since the tag is the publish.
 
@@ -55,6 +55,7 @@ gala plan       # read-only: what would release, at what version
 gala release     # the full release
 gala release --dry-run    # checks and preflights, writes nothing
 gala release --no-publish # turn publish = true off for this run
+gala release --resume     # finish a release whose tags are pushed
 gala version
 gala help
 ```
@@ -93,7 +94,7 @@ gala reads `gala.toml` at the repository root, or `.gala.toml` if you prefer to 
 
 ### What gala does not do
 
-- **Resume or repair.** If a registry publish fails after the tag is pushed, gala stops and prints the exact state along with the commands to recover by hand.
+- **Repair.** If a registry publish or the GitHub Release fails after the tag is pushed, gala stops and prints the exact state; `gala release --resume` finishes the remaining steps (in a monorepo, run the printed command, which names only the packages still to publish), and the message also gives the commands to run by hand. A push or tag that fails is undone locally so the release can be run again.
 - **Prerelease channels.** Prerelease tags like `v2.0.0-rc.1` are ignored when planning, and gala never creates them.
 - **Range rewriting between packages.** gala doesn't rewrite internal dependency ranges or regenerate lockfiles for them, so monorepo packages should use ranges or workspace protocols that survive a sibling bump.
 - **Dependency-ordered publishing.** Monorepo packages publish in the order you declare them, so list dependencies before the packages that use them.

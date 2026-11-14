@@ -287,7 +287,17 @@ func TestPypiArgvAndTextEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r := &captureRunner{}
+	// uv build writes into the --out-dir it is given.
+	r := &captureRunner{respond: func(_, name string, args []string) (string, error) {
+		if name == "uv" && len(args) == 3 && args[0] == "build" && args[1] == "--out-dir" {
+			for _, f := range []string{"gizmo-1.1.0.tar.gz", "gizmo-1.1.0-py3-none-any.whl"} {
+				if err := os.WriteFile(filepath.Join(args[2], f), []byte("x"), 0o644); err != nil {
+					return "", err
+				}
+			}
+		}
+		return "", nil
+	}}
 	p, _ := New("pypi", r)
 
 	v, ok, err := p.ManifestVersion(dir)
@@ -305,10 +315,39 @@ func TestPypiArgvAndTextEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The build goes to a fresh temporary directory and the upload names
+	// exactly the files that build produced, never a bare `uv publish`, which
+	// would also upload whatever earlier builds left in dist/.
+	var out string
+	if len(r.calls) == 3 && len(r.calls[1].args) == 3 {
+		out = r.calls[1].args[2]
+	}
+	if out == "" || strings.HasPrefix(out, dir) {
+		t.Fatalf("uv build must write to a fresh temporary directory, got calls %v", r.argvs())
+	}
 	got := r.argvs()
-	want := []string{"uv lock", "uv build", "uv publish"}
+	want := []string{
+		"uv lock",
+		"uv build --out-dir " + out,
+		"uv publish " + filepath.Join(out, "gizmo-1.1.0-py3-none-any.whl") + " " + filepath.Join(out, "gizmo-1.1.0.tar.gz"),
+	}
 	if strings.Join(got, " | ") != strings.Join(want, " | ") {
 		t.Errorf("argv = %v, want %v", got, want)
+	}
+	if _, err := os.Stat(out); !os.IsNotExist(err) {
+		t.Errorf("the temporary build directory must be removed, stat err = %v", err)
+	}
+
+	// A build that produces nothing is an error, not an empty upload.
+	empty := &captureRunner{}
+	pe, _ := New("pypi", empty)
+	if err := pe.Publish(dir); err == nil || !strings.Contains(err.Error(), "produced no files") {
+		t.Errorf("an empty build must fail before uv publish: %v", err)
+	}
+	for _, a := range empty.argvs() {
+		if strings.HasPrefix(a, "uv publish") {
+			t.Errorf("uv publish ran after an empty build: %v", empty.argvs())
+		}
 	}
 	if len(locks) != 1 || locks[0] != "uv.lock" {
 		t.Errorf("locks = %v", locks)
@@ -386,6 +425,10 @@ func TestRecoveryCommands(t *testing.T) {
 	c, _ := New("cargo", &captureRunner{})
 	if got := c.Recovery("/repo", "/repo"); got != "cd . && cargo publish" {
 		t.Errorf("cargo recovery = %q", got)
+	}
+	py, _ := New("pypi", &captureRunner{})
+	if got := py.Recovery("/repo/svc", "/repo"); got != "cd svc && rm -rf gala-dist && uv build --out-dir gala-dist && uv publish gala-dist/* && rm -rf gala-dist" {
+		t.Errorf("pypi recovery builds into a fresh directory: %q", got)
 	}
 	g, _ := New("go", &captureRunner{})
 	if got := g.Recovery("/repo", "/repo"); got != "" {

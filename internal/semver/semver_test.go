@@ -101,7 +101,14 @@ func TestBump(t *testing.T) {
 		{"1.2.3", Major, "2.0.0"},
 		{"0.7.0", Major, "1.0.0"}, // no 0.x special-casing
 		{"1.2.3", None, "1.2.3"},
-		{"1.2.3-rc.1", Minor, "1.3.0"}, // a prerelease never survives a bump
+		{"1.2.3-rc.1", Minor, "1.3.0"}, // a minor outranks a patch prerelease
+		{"1.2.0-rc.1", Patch, "1.2.0"}, // a prerelease finalizes when the bump does not outrank it
+		{"1.2.3-rc.1", Patch, "1.2.3"},
+		{"1.2.0-rc.1", Minor, "1.2.0"},
+		{"1.2.0-rc.1", Major, "2.0.0"},
+		{"2.0.0-rc.1", Major, "2.0.0"},
+		{"2.0.0-rc.1", Minor, "2.0.0"},
+		{"1.2.3-rc.1", None, "1.2.3"}, // no bump: the version loses its prerelease only
 	}
 	for _, tc := range cases {
 		got := MustParse(tc.in).Bump(tc.b).String()

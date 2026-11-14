@@ -42,12 +42,16 @@ func run(args []string) int {
 		opts.ConfigPath = c.config
 	}
 	opts.NoPublish = c.noPublish
+	opts.Packages = c.packages
 
 	mode := release.ModePlan
 	if c.command == cmdRelease {
 		mode = release.ModeRelease
 		if c.dryRun {
 			mode = release.ModeDryRun
+		}
+		if c.resume {
+			mode = release.ModeResume
 		}
 	}
 
