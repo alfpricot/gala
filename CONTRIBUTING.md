@@ -14,7 +14,7 @@ go build ./...
 just run plan
 ```
 
-You'll need Go 1.27.3 or newer (see `go.mod`), `git`, [`just`](https://github.com/casey/just), and Node 18 or newer for the npm package checks. The dev tools (staticcheck, errcheck, govulncheck) are pinned in `go.mod` and run through `go tool`.
+You'll need Go 1.27.4 or newer (see `go.mod`), `git`, [`just`](https://github.com/casey/just), and Node 18 or newer for the npm package checks. The dev tools (staticcheck, errcheck, govulncheck) are pinned in `go.mod` and run through `go tool`.
 
 ## Checking your work
 
