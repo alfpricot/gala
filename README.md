@@ -13,7 +13,7 @@ It sticks to the release itself. There's no dependency-graph handling, no proven
 In CI, pin to a release tag so builds are reproducible:
 
 ```sh
-go install github.com/alfpricot/gala/cmd/gala@v0.3.1
+go install github.com/alfpricot/gala/cmd/gala@v1.0.0
 ```
 
 For local use, `@latest` is fine:

@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.0 (2026-11-14)
+
+### Breaking Changes
+
+* **release:** finalize prereleases, read TOML literals, and bound publish inputs (#25)
+* **release:** stream hook output, add hookTimeout, and keep tokens out of hooks (#24)
+* **release:** refuse an existing next tag and ambiguous tag prefixes (#22)
+
+### Features
+
+* **release:** add release --resume and fix the help and install pin (#26)
+
+### Bug Fixes
+
+* **release:** undo a failed push or tag and print the manual recovery steps (#23)
+
 ## 0.3.1 (2026-10-29)
 
 ### Bug Fixes
