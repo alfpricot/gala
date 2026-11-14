@@ -43,7 +43,7 @@ gala is a single Go binary with one runtime dependency, `github.com/BurntSushi/t
 
 ### Requirements
 
-- Go 1.27.3 or newer to build or install (the version in `go.mod`).
+- Go 1.27.4 or newer to build or install (the version in `go.mod`).
 - `git` on `PATH`.
 - For `gala release` (including `--dry-run`), the tool for each configured `manager` (a monorepo can set one per package): `npm`, `cargo`, `uv`, or `dotnet` (the .NET SDK, for `nuget`). gala runs it to write versions and refresh lockfiles, and to publish when `publish = true`. The `go` and `none` managers need nothing extra, since the tag is the publish.
 

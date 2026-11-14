@@ -85,6 +85,13 @@ func (e *Engine) preflight(plan *Plan, allowPublish bool) error {
 		return err
 	}
 
+	// Every tag the release will create must be free, locally and on the
+	// remote, or the tag or the atomic push would fail after the release
+	// commit exists.
+	if err := e.checkTags(plan.Due()); err != nil {
+		return err
+	}
+
 	// A missing token warns; it never fails.
 	if e.cfg.GitHubRelease && e.opts.Token == "" {
 		e.opts.warnf("no GITHUB_TOKEN or GH_TOKEN in the environment — the GitHub Release step will be skipped")
@@ -128,6 +135,37 @@ func (e *Engine) checkIgnored(due []*PackagePlan) error {
 	return fmt.Errorf("the release commit would leave out files gala writes, because git ignores them — "+
 		"remove or narrow each matching rule (source:line:pattern below) so the file is no longer ignored:\n  %s",
 		strings.Join(lines, "\n  "))
+}
+
+// checkTags refuses a release whose next tag already exists. The plan reads
+// only tags merged into HEAD, so a tag on an unreachable commit, or on the
+// remote and never fetched, is invisible to it; creating the tag, or pushing
+// it, would then fail after the release commit was made.
+func (e *Engine) checkTags(due []*PackagePlan) error {
+	for _, pkg := range due {
+		local, err := e.repo.HasTag(pkg.NextTag)
+		if err != nil {
+			return fmt.Errorf("cannot check whether tag %s exists: %w", pkg.NextTag, err)
+		}
+		if local {
+			return fmt.Errorf("tag %s already exists locally but is not reachable from HEAD, so the plan did not see it — "+
+				"inspect it (git show %s); if it is stale, delete it locally (git tag -d %s) and on the remote "+
+				"if it is there too (git push %s --delete %s), since a CI checkout fetches remote tags again "+
+				"on every run; otherwise merge the commit it points at into %s",
+				pkg.NextTag, pkg.NextTag, pkg.NextTag, e.cfg.Remote, pkg.NextTag, e.branch)
+		}
+		remoteSHA, err := e.repo.LsRemote(e.cfg.Remote, "refs/tags/"+pkg.NextTag)
+		if err != nil {
+			return fmt.Errorf("cannot read tag %s from remote %q — the push would fail after local writes: %w",
+				pkg.NextTag, e.cfg.Remote, err)
+		}
+		if remoteSHA != "" {
+			return fmt.Errorf("tag %s already exists on remote %q but this checkout does not have it, so the plan did not see it — "+
+				"fetch it and merge the branch it belongs to (git fetch %s --tags), "+
+				"or delete the remote tag if it is stale", pkg.NextTag, e.cfg.Remote, e.cfg.Remote)
+		}
+	}
+	return nil
 }
 
 func (e *Engine) checkRemote() error {

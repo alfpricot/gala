@@ -25,11 +25,13 @@ manager = "npm"          # the default for every package
 [[package]]
 path = "packages/core"   # required; name defaults to the manifest's package name
 # name = "core"          # optional override
-# tagPrefix = "core/v"   # default "<name>/v"
+# tagPrefix = "core/v"   # default "<name>/v"; "<path>/v" for manager = "go" (a trailing /vN directory is dropped)
 
 [[package]]
 path = "packages/cli"    # declared after core because it depends on core
 ```
+
+A go package with no `tagPrefix` is tagged `<path>/vX.Y.Z` (plain `vX.Y.Z` at the repository root), because Go resolves a nested module's versions only from tags named after its directory. Earlier versions of gala used `<name>/v`; when a go package has tags under that old prefix and none under the new one, gala refuses to plan it and names both prefixes. Set `tagPrefix = "<name>/v"` to keep versioning from the existing tags, or tag the same commit with a `<path>/vX.Y.Z` tag to continue under the new prefix.
 
 ```toml
 # monorepo with several ecosystems: each package can override the manager,
@@ -72,7 +74,7 @@ pattern = '__version__ = "([^"]+)"'
 | `tagPrefix` | `"v"` | app only |
 | `changelog` | `"CHANGELOG.md"` | path relative to the repo root |
 | `remote` | `"origin"` | used for the push and to work out the owner and repo |
-| `[[package]]` | none | monorepo only: `path` is required; `name`, `tagPrefix`, `manager`, `publish`, `preRelease`, `postBump`, `postBumpPaths`, and `[[package.versionFile]]` are optional; declaration order is publish order |
+| `[[package]]` | none | monorepo only: two packages may not share a `tagPrefix`, or use prefixes where one extends the other with a digit; `path` is required; `name`, `tagPrefix`, `manager`, `publish`, `preRelease`, `postBump`, `postBumpPaths`, and `[[package.versionFile]]` are optional; declaration order is publish order |
 | `[[versionFile]]` | none | app only (a monorepo package uses `[[package.versionFile]]`): more files that carry the release version; see [Extra version files](#extra-version-files) |
 | `preRelease` | `[]` | commands run after the preflights and before any write; see [Hook commands](#hook-commands) |
 | `postBump` | `[]` | commands run after the version writes and before staging |
