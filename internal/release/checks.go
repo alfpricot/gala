@@ -11,8 +11,10 @@ import (
 
 // checks is pipeline step 1: everything that can fail read-only, before any
 // plan-dependent work. `plan` skips it; `release` and `release --dry-run` run
-// it.
-func (e *Engine) checks() error {
+// it. A resume only needs the clean tree: it works from the tags at HEAD and
+// never commits to or syncs a branch, so it also runs from a detached HEAD
+// checked out at the release commit after the branch has moved on.
+func (e *Engine) checks(resume bool) error {
 	paths, err := e.repo.Status()
 	if err != nil {
 		return err
@@ -24,6 +26,9 @@ func (e *Engine) checks() error {
 		}
 		return fmt.Errorf("working tree is not clean — gala releases exactly what is checked in; "+
 			"commit or stash these first:\n  %s", strings.Join(shown, "\n  "))
+	}
+	if resume {
+		return nil
 	}
 
 	if e.branchErr != nil {

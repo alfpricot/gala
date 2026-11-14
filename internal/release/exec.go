@@ -218,8 +218,8 @@ func (e *Engine) githubReleases(due []*PackagePlan, allowPublish bool) error {
 			e.note("release %s already exists on %s", pkg.NextTag, remote)
 		case err != nil:
 			return fmt.Errorf("%w\n  the tags are pushed, so a plain release finds nothing due; fix the cause and run "+
-				"`gala release --resume` to create the releases and publish, or finish by hand:\n%s",
-				err, e.manualFinish(due[i:], publishing(due, allowPublish)))
+				"`%s` to finish the remaining steps, or finish by hand:\n%s",
+				err, e.resumeCommand(due), e.manualFinish(due[i:], publishing(due, allowPublish)))
 		default:
 			e.note("release %s on %s", pkg.NextTag, remote)
 		}
@@ -228,10 +228,15 @@ func (e *Engine) githubReleases(due []*PackagePlan, allowPublish bool) error {
 }
 
 // resumeCommand is the gala command that finishes the given packages after a
-// failed publish: a monorepo names them, so a package that already published
-// is not published again, and an app has nothing to name.
+// failure past the push: a monorepo names them, so a package that already
+// published is not published again, and an app has nothing to name. A run that
+// was told not to publish repeats that, so following the command never
+// publishes what the failed run was not allowed to.
 func (e *Engine) resumeCommand(pkgs []*PackagePlan) string {
 	cmd := "gala release --resume"
+	if e.opts.NoPublish {
+		cmd += " --no-publish"
+	}
 	if e.cfg.Kind != config.KindMonorepo {
 		return cmd
 	}
@@ -331,9 +336,9 @@ func (e *Engine) afterRejectedPush(pushErr error, start string, tags []string, d
 			e.opts.warnf("%v", err)
 		}
 		return fmt.Errorf("%w\n  the remote already has the release commit and tags, so gala left the local commit and "+
-			"tags alone and a plain release finds nothing due; `gala release --resume` creates the GitHub Releases "+
-			"and publishes, and the branch sync is not part of it, so finish by hand:\n%s",
-			cause, e.manualPushedSteps(due, allowPublish))
+			"tags alone and a plain release finds nothing due; `%s` finishes the GitHub Releases and the publishes, "+
+			"and the branch sync is not part of it, so finish by hand:\n%s",
+			cause, e.resumeCommand(due), e.manualPushedSteps(due, allowPublish))
 	}
 	return e.abortLocal(cause, start, tags)
 }

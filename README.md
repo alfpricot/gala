@@ -94,7 +94,7 @@ gala reads `gala.toml` at the repository root, or `.gala.toml` if you prefer to 
 
 ### What gala does not do
 
-- **Repair.** If a registry publish or the GitHub Release fails after the tag is pushed, gala stops and prints the exact state; `gala release --resume` finishes the remaining steps, and the message also gives the commands to run by hand. A push or tag that fails is undone locally so the release can simply be run again.
+- **Repair.** If a registry publish or the GitHub Release fails after the tag is pushed, gala stops and prints the exact state; `gala release --resume` finishes the remaining steps (in a monorepo, run the printed command, which names only the packages still to publish), and the message also gives the commands to run by hand. A push or tag that fails is undone locally so the release can be run again.
 - **Prerelease channels.** Prerelease tags like `v2.0.0-rc.1` are ignored when planning, and gala never creates them.
 - **Range rewriting between packages.** gala doesn't rewrite internal dependency ranges or regenerate lockfiles for them, so monorepo packages should use ranges or workspace protocols that survive a sibling bump.
 - **Dependency-ordered publishing.** Monorepo packages publish in the order you declare them, so list dependencies before the packages that use them.

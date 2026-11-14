@@ -7,8 +7,9 @@ usage:
   gala release             run the full pipeline: write, tag, push, publish
   gala release --dry-run   run the checks and preflights; preRelease commands run,
                            nothing is written
-  gala release --resume    finish a release whose tags are pushed: the GitHub
-                           Release and the publish steps that did not complete
+  gala release --resume    finish a release whose tags are pushed: create the
+                           missing GitHub Releases and publish every package
+                           tagged at HEAD (leave out any that already published)
   gala version             print the gala version
   gala help                print this help
 

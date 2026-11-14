@@ -305,6 +305,16 @@ func (g *Repo) HeadSHA() (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// RefSHA returns the object a local ref names, unpeeled: for an annotated tag
+// that is the tag object, the same value ls-remote reports for the tag.
+func (g *Repo) RefSHA(ref string) (string, error) {
+	out, err := g.Run("rev-parse", "--verify", "--end-of-options", ref)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // LsRemote returns the hash the remote has for a ref, or "" when the remote
 // does not have it yet.
 func (g *Repo) LsRemote(remote, ref string) (string, error) {

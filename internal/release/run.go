@@ -10,8 +10,10 @@ import (
 //
 // A release always reports `released` to GITHUB_OUTPUT: execute writes
 // released=true once the tags are pushed, and every other exit (nothing due,
-// or a failure before the push) writes released=false here. A write failure
-// only warns, so it never changes the exit code.
+// or a failure before the push) writes released=false here. A resume reports
+// the same way once it has confirmed its tags are on the remote; a resume that
+// stops before that writes released=false. A write failure only warns, so it
+// never changes the exit code.
 func Run(opts *Options, mode Mode) error {
 	var e *Engine
 	err := run(opts, mode, &e)
@@ -32,7 +34,7 @@ func run(opts *Options, mode Mode, engine **Engine) error {
 
 	// Step 1: read-only checks. `plan` skips them — it works anywhere.
 	if mode != ModePlan {
-		if err := e.checks(); err != nil {
+		if err := e.checks(mode == ModeResume); err != nil {
 			return err
 		}
 	}

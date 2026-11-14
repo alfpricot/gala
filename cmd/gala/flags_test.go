@@ -138,7 +138,11 @@ func TestUsageNamesEveryConfigKeyAndTheResumeCommand(t *testing.T) {
 			t.Errorf("usage must mention %q:\n%s", want, usageText)
 		}
 	}
-	if strings.Contains(usageText, "no writes\n") && !strings.Contains(usageText, "preRelease commands run") {
-		t.Errorf("usage must say that --dry-run runs the preRelease commands:\n%s", usageText)
+	for _, want := range []string{
+		"preRelease commands run,", "nothing is written", "preRelease commands, no writes",
+	} {
+		if !strings.Contains(usageText, want) {
+			t.Errorf("usage must say that --dry-run runs the preRelease commands and writes nothing (missing %q):\n%s", want, usageText)
+		}
 	}
 }

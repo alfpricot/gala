@@ -44,6 +44,10 @@ func (e *Engine) resume(opts *Options) error {
 			return err
 		}
 		if tag == "" {
+			if only[s.name] {
+				return fmt.Errorf("--package %q has no release tag at HEAD — it was not released in this commit, "+
+					"so there is nothing to resume for it", s.name)
+			}
 			continue
 		}
 		heading := v.String()
@@ -60,12 +64,15 @@ func (e *Engine) resume(opts *Options) error {
 		})
 	}
 	if len(due) == 0 {
-		return fmt.Errorf("no release tag points at HEAD on branch %s — resume finishes a release whose tags are pushed, "+
-			"so run it on the release commit (the one `chore(release)` commit that carries the tags)", e.branch)
+		return fmt.Errorf("no release tag points at HEAD (%s) — resume finishes a release whose tags are pushed, "+
+			"so run it on the release commit (the `chore(release)` commit that carries the tags); when the branch has "+
+			"moved past it, check that commit out first: git switch --detach <tag>", e.branch)
 	}
 
 	// A tag that exists only here would publish a release that was never
-	// pushed.
+	// pushed, and a same-named tag on another object would publish this tree
+	// under a version the remote tag does not describe. ls-remote reports the
+	// tag object, so it is compared with the local tag object.
 	for _, pkg := range due {
 		remoteSHA, err := e.repo.LsRemote(e.cfg.Remote, "refs/tags/"+pkg.NextTag)
 		if err != nil {
@@ -75,6 +82,26 @@ func (e *Engine) resume(opts *Options) error {
 			return fmt.Errorf("tag %s is not on remote %q — resume only finishes a release whose tags are pushed; "+
 				"push it first (git push %s %s) or run a normal release", pkg.NextTag, e.cfg.Remote, e.cfg.Remote, pkg.NextTag)
 		}
+		localSHA, err := e.repo.RefSHA("refs/tags/" + pkg.NextTag)
+		if err != nil {
+			return fmt.Errorf("cannot read the local tag %s: %w", pkg.NextTag, err)
+		}
+		if localSHA != remoteSHA {
+			return fmt.Errorf("tag %s on remote %q is a different object than the local tag (%s there, %s here) — "+
+				"fetch the remote tags or delete the stale local one before resuming",
+				pkg.NextTag, e.cfg.Remote, shortSHA(remoteSHA), shortSHA(localSHA))
+		}
+	}
+
+	// The tags are confirmed pushed from here on, so the workflow outputs say
+	// so even if a later check or step fails.
+	names := make([]string, len(due))
+	for i, pkg := range due {
+		names[i] = pkg.NextTag
+	}
+	e.note("resume  %s", strings.Join(names, ", "))
+	if err := e.writeGitHubOutput(due); err != nil {
+		e.opts.warnf("%v", err)
 	}
 
 	allowPublish := !opts.NoPublish
@@ -89,18 +116,18 @@ func (e *Engine) resume(opts *Options) error {
 		}
 	}
 
-	names := make([]string, len(due))
-	for i, pkg := range due {
-		names[i] = pkg.NextTag
-	}
-	e.note("resume  %s", strings.Join(names, ", "))
-	if err := e.writeGitHubOutput(due); err != nil {
-		e.opts.warnf("%v", err)
-	}
 	if err := e.githubReleases(due, allowPublish); err != nil {
 		return err
 	}
 	return e.publish(due, allowPublish)
+}
+
+// shortSHA abbreviates an object name for a message.
+func shortSHA(s string) string {
+	if len(s) > 12 {
+		return s[:12]
+	}
+	return s
 }
 
 // resumeSelection validates the --package names against the configured
