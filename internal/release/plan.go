@@ -154,6 +154,7 @@ type spec struct {
 	legacyPrefix string
 	mgr          manager.Manager
 	publish      bool
+	minorOnZero  bool
 	files        []config.VersionFile
 	hooks        config.Hooks
 }
@@ -267,7 +268,7 @@ func (e *Engine) specs() ([]spec, error) {
 		}
 		return []spec{{
 			name: name, absDir: e.root, relDir: ".", prefix: e.cfg.TagPrefix,
-			mgr: mgr, publish: e.cfg.Publish, files: e.cfg.VersionFiles,
+			mgr: mgr, publish: e.cfg.Publish, minorOnZero: e.cfg.MinorOnZero, files: e.cfg.VersionFiles,
 		}}, nil
 	}
 
@@ -299,7 +300,7 @@ func (e *Engine) specs() ([]spec, error) {
 		}
 		specs = append(specs, spec{
 			name: name, absDir: absDir, relDir: p.Path, prefix: prefix, legacyPrefix: legacy,
-			mgr: mgr, publish: p.Publish, files: p.VersionFiles, hooks: p.Hooks,
+			mgr: mgr, publish: p.Publish, minorOnZero: p.MinorOnZero, files: p.VersionFiles, hooks: p.Hooks,
 		})
 	}
 	if err := checkTagPrefixes(specs); err != nil {
@@ -486,6 +487,9 @@ func (e *Engine) buildPackagePlan(s spec, anchor string, base semver.Version, co
 			pkg.Skipped++
 		}
 		bump = semver.Max(bump, c.Bump())
+	}
+	if bump == semver.Major && base.Major == 0 && s.minorOnZero {
+		bump = semver.Minor
 	}
 	pkg.Bump = bump
 	pkg.Next = base.Bump(bump)

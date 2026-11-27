@@ -459,3 +459,38 @@ func TestPrereleaseManifestFinalizes(t *testing.T) {
 	mustContain(t, out.String(), "  Reverts\n", "git's default revert subject renders under Reverts")
 	mustContain(t, out.String(), "feat: the flag (#12)", "the reverted subject is the description")
 }
+
+// TestPlanBreakingChangeOnZero: a breaking change on a 0.x version releases
+// 1.0.0 unless minorOnZero asks for a minor bump, and bumps the major from
+// 1.0.0 on either way.
+func TestPlanBreakingChangeOnZero(t *testing.T) {
+	for _, tc := range []struct {
+		name, config, tag, want string
+	}{
+		{"default", appConfig, "v0.3.1", "v1.0.0"},
+		{"minor on zero", appConfig + "minorOnZero = true\n", "v0.3.1", "v0.4.0"},
+		{"stable", appConfig + "minorOnZero = true\n", "v1.3.1", "v2.0.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _, cleanup := fixture(t, tc.config)
+			defer cleanup()
+
+			// A go module going to major 2 must carry the /v2 suffix.
+			if err := r.CommitFile("go.mod", "module example.com/repo/v2\n", "feat: first feature"); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.Tag(tc.tag); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.CommitFile("app2.go", "package app\n", "feat!: drop the old flag"); err != nil {
+				t.Fatal(err)
+			}
+
+			opts, out, _ := testOptions(r, nil)
+			if err := Run(opts, ModePlan); err != nil {
+				t.Fatal(err)
+			}
+			mustContain(t, out.String(), tc.want, "plan output")
+		})
+	}
+}

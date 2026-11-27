@@ -15,11 +15,11 @@ The base version is the latest reachable stable tag, or the manifest's current v
 | `perf` | patch | Performance |
 | `refactor` | patch | Refactoring |
 | `revert` (also git's default `Revert "<subject>"`, with the ` (#N)` a squash merge appends) | patch | Reverts |
-| `!` suffix or `BREAKING CHANGE:`/`BREAKING-CHANGE:` footer | major (overrides the type) | Breaking Changes (listed first) |
+| `!` suffix or `BREAKING CHANGE:`/`BREAKING-CHANGE:` footer | major (overrides the type); minor on a 0.x version when `minorOnZero` is set | Breaking Changes (listed first) |
 | `docs` `test` `style` `build` `ci` `chore` | none | hidden |
 | non-conforming message (includes promotion merge commits) | none | counted and reported as skipped |
 
-It's plain semver arithmetic with no special treatment for 0.x: `0.7.0` plus a major bump is `1.0.0`. A manifest that is at a prerelease finalizes it when the bump does not outrank it: `1.2.0-rc.1` with a patch or minor bump releases `1.2.0`, `1.2.1-rc.1` with a patch bump releases `1.2.1`, while `1.2.1-rc.1` with a minor bump releases `1.3.0`. This applies when the package has no stable tag yet, such as a project adopting gala while it is at a release candidate. Once a stable tag exists the manifest must equal it, and a prerelease manifest is a drift error to reconcile by hand.
+It's plain semver arithmetic with no special treatment for 0.x by default: `0.7.2` plus a major bump is `1.0.0`. With `minorOnZero = true` (see [Configuration](CONFIGURATION.md)), a breaking change on a 0.x version bumps the minor instead, so `0.7.2` becomes `0.8.0`, still listed under Breaking Changes. To release `1.0.0`, remove the setting and release a breaking change. From `1.0.0` on, the setting has no effect. A manifest that is at a prerelease finalizes it when the bump does not outrank it: `1.2.0-rc.1` with a patch or minor bump releases `1.2.0`, `1.2.1-rc.1` with a patch bump releases `1.2.1`, while `1.2.1-rc.1` with a minor bump releases `1.3.0`. This applies when the package has no stable tag yet, such as a project adopting gala while it is at a release candidate. Once a stable tag exists the manifest must equal it, and a prerelease manifest is a drift error to reconcile by hand.
 
 Commit subjects render into the changelog and the GitHub Release as written, except that an `@handle` is wrapped in a code span so it never notifies the person, and markdown characters in a scope are escaped.
 
