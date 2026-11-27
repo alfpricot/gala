@@ -51,6 +51,7 @@ type Package struct {
 	TagPrefix    string
 	Manager      ManagerName
 	Publish      bool
+	MinorOnZero  bool
 	VersionFiles []VersionFile
 	Hooks
 }
@@ -104,9 +105,12 @@ func (h Hooks) MatchesPostBumpPath(p string) bool {
 
 // Config is a validated config file.
 type Config struct {
-	Kind            Kind
-	Manager         ManagerName // "" in a monorepo whose packages each name one
-	Publish         bool
+	Kind    Kind
+	Manager ManagerName // "" in a monorepo whose packages each name one
+	Publish bool
+	// MinorOnZero makes a breaking change on a 0.x version bump the minor, which
+	// is how 0.x versions signal a break, instead of releasing 1.0.0.
+	MinorOnZero     bool
 	GitHubRelease   bool
 	ReleaseBranches []string
 	SyncBranch      string
@@ -131,6 +135,7 @@ type packageFile struct {
 	TagPrefix     string            `toml:"tagPrefix"`
 	Manager       string            `toml:"manager"`
 	Publish       *bool             `toml:"publish"`
+	MinorOnZero   *bool             `toml:"minorOnZero"`
 	VersionFiles  []versionFileFile `toml:"versionFile"`
 	PreRelease    []string          `toml:"preRelease"`
 	PostBump      []string          `toml:"postBump"`
@@ -151,6 +156,7 @@ type file struct {
 	Kind            string            `toml:"kind"`
 	Manager         string            `toml:"manager"`
 	Publish         *bool             `toml:"publish"`
+	MinorOnZero     *bool             `toml:"minorOnZero"`
 	GitHubRelease   *bool             `toml:"githubRelease"`
 	ReleaseBranches []string          `toml:"releaseBranches"`
 	SyncBranch      *string           `toml:"syncBranch"`
@@ -213,6 +219,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg.Publish = f.Publish != nil && *f.Publish
+	cfg.MinorOnZero = f.MinorOnZero != nil && *f.MinorOnZero
 
 	cfg.GitHubRelease = true
 	if f.GitHubRelease != nil {
@@ -341,11 +348,11 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// loadPackage resolves one [[package]]: its manager and publish setting fall
-// back to the top level, and its version files and postBumpPaths are given
-// relative to the package directory.
+// loadPackage resolves one [[package]]: its manager, publish, and minorOnZero
+// settings fall back to the top level, and its version files and postBumpPaths
+// are given relative to the package directory.
 func (c *Config) loadPackage(source string, p packageFile) (Package, error) {
-	pkg := Package{Path: p.Path, Name: p.Name, TagPrefix: p.TagPrefix, Manager: c.Manager, Publish: c.Publish}
+	pkg := Package{Path: p.Path, Name: p.Name, TagPrefix: p.TagPrefix, Manager: c.Manager, Publish: c.Publish, MinorOnZero: c.MinorOnZero}
 	if p.Manager != "" {
 		m, err := managerName(p.Manager)
 		if err != nil {
@@ -355,6 +362,9 @@ func (c *Config) loadPackage(source string, p packageFile) (Package, error) {
 	}
 	if p.Publish != nil {
 		pkg.Publish = *p.Publish
+	}
+	if p.MinorOnZero != nil {
+		pkg.MinorOnZero = *p.MinorOnZero
 	}
 	var err error
 	if pkg.VersionFiles, err = c.versionFiles(source, p.Path, p.VersionFiles); err != nil {

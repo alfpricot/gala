@@ -9,6 +9,7 @@ Put `gala.toml` or `.gala.toml` at the repository root. You need exactly one of 
 kind = "app"          # "app" | "monorepo"  (required)
 manager = "go"        # "go" | "npm" | "cargo" | "pypi" | "nuget" | "none"  (required)
 publish = true        # push to the registry after tagging (default false)
+minorOnZero = false   # a breaking change on 0.x bumps the minor, not to 1.0.0 (default false)
 githubRelease = true  # create a GitHub Release per released tag (default true)
 releaseBranches = ["main"]  # release refuses other branches; plan works anywhere
 syncBranch = "dev"    # fast-forward this branch to the release commit (default "") 
@@ -68,13 +69,14 @@ pattern = '__version__ = "([^"]+)"'
 | `kind` | required | `app` or `monorepo` |
 | `manager` | required | one of `go`, `npm`, `cargo`, `pypi`, `nuget`, `none` (see [Other ecosystems](#other-ecosystems)); in a monorepo it's the default for every package, and it can be left out when every `[[package]]` sets its own |
 | `publish` | `false` | off by default: without it, a release stops after the GitHub Release; in a monorepo it's the default for every package |
+| `minorOnZero` | `false` | by default a breaking change on a 0.x version releases `1.0.0`; `true` makes it bump the minor; no effect from `1.0.0` on; in a monorepo it's the default for every package |
 | `githubRelease` | `true` | needs `GITHUB_TOKEN` or `GH_TOKEN`; with no token, or on a non-GitHub remote, gala warns and skips it |
 | `releaseBranches` | `["main"]` | checked by `release` (and `--dry-run`), not by `plan` |
 | `syncBranch` | `""` | after the release push, gala runs a plain `git push <remote> <branch>:<syncBranch>`; it's never forced, and a rejection only warns |
 | `tagPrefix` | `"v"` | app only |
 | `changelog` | `"CHANGELOG.md"` | path relative to the repo root |
 | `remote` | `"origin"` | used for the push and to work out the owner and repo |
-| `[[package]]` | none | monorepo only: two packages may not share a `tagPrefix`, or use prefixes where one extends the other with a digit; `path` is required; `name`, `tagPrefix`, `manager`, `publish`, `preRelease`, `postBump`, `postBumpPaths`, and `[[package.versionFile]]` are optional; declaration order is publish order |
+| `[[package]]` | none | monorepo only: two packages may not share a `tagPrefix`, or use prefixes where one extends the other with a digit; `path` is required; `name`, `tagPrefix`, `manager`, `publish`, `minorOnZero`, `preRelease`, `postBump`, `postBumpPaths`, and `[[package.versionFile]]` are optional; declaration order is publish order |
 | `[[versionFile]]` | none | app only (a monorepo package uses `[[package.versionFile]]`): more files that carry the release version; see [Extra version files](#extra-version-files) |
 | `hookTimeout` | none | a Go duration such as `"10m"`: a `preRelease` or `postBump` command still running after that long has its own process stopped and the release fails; see [Hook commands](#hook-commands) |
 | `preRelease` | `[]` | commands run after the preflights and before any write; see [Hook commands](#hook-commands) |

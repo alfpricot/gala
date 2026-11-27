@@ -185,7 +185,8 @@ func (v Version) Stable() bool {
 }
 
 // Bump applies a bump with plain semver arithmetic: there is no 0.x special
-// casing, so 0.7.0 with a major bump becomes 1.0.0.
+// casing, so 0.7.0 with a major bump becomes 1.0.0. The release plan can ask
+// for a minor bump instead for a breaking change on a 0.x version.
 //
 // A prerelease finalizes when the bump does not outrank it: 1.2.0-rc.1 with a
 // patch or minor bump releases 1.2.0, and 1.2.1-rc.1 with a patch bump releases

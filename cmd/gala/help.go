@@ -22,9 +22,9 @@ flags:
   --package <name>  with --resume, only this package; repeat for several
 
 config (gala.toml or .gala.toml at the repo root):
-  kind, manager, publish, githubRelease, releaseBranches, syncBranch,
-  tagPrefix, changelog, remote, [[versionFile]], preRelease, postBump,
-  postBumpPaths, hookTimeout, and [[package]] entries for a monorepo.
+  kind, manager, publish, minorOnZero, githubRelease, releaseBranches,
+  syncBranch, tagPrefix, changelog, remote, [[versionFile]], preRelease,
+  postBump, postBumpPaths, hookTimeout, and [[package]] entries for a monorepo.
 
 exit codes:
   0  success, or no release due
