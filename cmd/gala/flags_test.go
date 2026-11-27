@@ -131,7 +131,7 @@ func TestParseArgsResume(t *testing.T) {
 
 func TestUsageNamesEveryConfigKeyAndTheResumeCommand(t *testing.T) {
 	for _, want := range []string{
-		"[[versionFile]]", "preRelease", "postBump", "postBumpPaths", "hookTimeout",
+		"minorOnZero", "[[versionFile]]", "preRelease", "postBump", "postBumpPaths", "hookTimeout",
 		"gala release --resume", "--package <name>",
 	} {
 		if !strings.Contains(usageText, want) {
